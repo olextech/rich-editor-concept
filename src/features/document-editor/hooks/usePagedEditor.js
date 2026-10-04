@@ -26,6 +26,8 @@ export function usePagedEditor({
     value: "",
     error: "",
   });
+  const [tablePropertiesDialog, setTablePropertiesDialog] = useState(null);
+  const [imagePreferencesDialog, setImagePreferencesDialog] = useState(null);
 
   useEffect(() => {
     setIsReady(false);
@@ -33,6 +35,8 @@ export function usePagedEditor({
     setError("");
     setCanonicalHtml(latest.current.initialHtml);
     setSourceDialog({ isOpen: false, value: "", error: "" });
+    setTablePropertiesDialog(null);
+    setImagePreferencesDialog(null);
     const controller = new PagedEditorController({
       html: latest.current.initialHtml,
       metrics: getPageMetrics(latest.current.pageSettings),
@@ -52,6 +56,8 @@ export function usePagedEditor({
           value: formatHtmlSource(html),
           error: "",
         }),
+      onTableProperties: setTablePropertiesDialog,
+      onImagePreferences: setImagePreferencesDialog,
     });
     controllerRef.current = controller;
     controller.registerHost(editableHost.current);
@@ -99,6 +105,7 @@ export function usePagedEditor({
       setSourceDialog((current) => ({
         ...current,
         value: formatHtmlSource(current.value),
+        error: "",
       })),
     [],
   );
@@ -110,6 +117,29 @@ export function usePagedEditor({
       setSourceDialog((current) => ({ ...current, error: error.message }));
     }
   }, [sourceDialog.value]);
+  const closeTablePropertiesDialog = useCallback(() => {
+    setTablePropertiesDialog(null);
+    // Wait for the native modal to close before focusing the editor.
+    requestAnimationFrame(() => controllerRef.current?.closeTableProperties());
+  }, []);
+  const saveTablePropertiesDialog = useCallback((kind, changes) => {
+    controllerRef.current?.applyTableProperties(kind, changes);
+    setTablePropertiesDialog(null);
+    requestAnimationFrame(() =>
+      controllerRef.current?.editor?.editing.view.focus(),
+    );
+  }, []);
+  const closeImagePreferencesDialog = useCallback(() => {
+    setImagePreferencesDialog(null);
+    requestAnimationFrame(() => controllerRef.current?.closeImagePreferences());
+  }, []);
+  const saveImagePreferencesDialog = useCallback((changes) => {
+    controllerRef.current?.applyImagePreferences(changes);
+    setImagePreferencesDialog(null);
+    requestAnimationFrame(() =>
+      controllerRef.current?.editor?.editing.view.focus(),
+    );
+  }, []);
   return {
     pageNames,
     canonicalHtml,
@@ -125,6 +155,12 @@ export function usePagedEditor({
     formatSourceValue,
     closeSourceDialog,
     saveSourceDialog,
+    tablePropertiesDialog,
+    closeTablePropertiesDialog,
+    saveTablePropertiesDialog,
+    imagePreferencesDialog,
+    closeImagePreferencesDialog,
+    saveImagePreferencesDialog,
     getHtml: () => controllerRef.current?.getHtml() ?? initialHtml,
   };
 }

@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 const runtimeErrors = new WeakMap();
+const WIDE_IMAGE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFAAAAAoCAIAAADmAupWAAAAV0lEQVR4nOXOMQEAMAyAMIZ/z52L9iAK8oYWiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYrwPbPovGAU/teAiZAAAAAElFTkSuQmCC";
 const tableVariableData = JSON.parse(
   await readFile(
     new URL("../shared/table-variables.json", import.meta.url),
@@ -30,6 +32,13 @@ async function getHtml(page) {
 async function choose(page, label, value) {
   await page.getByRole("combobox", { name: label, exact: true }).click();
   await page.getByRole("option", { name: value, exact: true }).click();
+}
+async function imagePreferences(page, index = 0) {
+  await page.locator(".ck-content img").nth(index).click();
+  await page
+    .getByRole("button", { name: "Image preferences", exact: true })
+    .click();
+  return page.getByRole("dialog", { name: "Image preferences", exact: true });
 }
 async function settled(page) {
   await expect(
@@ -151,6 +160,304 @@ test("manual blank pages and image-only pages survive source round trips and und
   await expect(page.locator(".page-frame")).toHaveCount(4);
 });
 
+test("uploaded and resized images survive source edits, save, reload and PDF export", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "New template" }).click();
+  await settled(page);
+  const chooser = page.waitForEvent("filechooser");
+  await page
+    .getByRole("button", { name: "Upload image from computer", exact: true })
+    .click();
+  await (
+    await chooser
+  ).setFiles({
+    name: "wide-image.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAFAAAAAoCAIAAADmAupWAAAAV0lEQVR4nOXOMQEAMAyAMIZ/z52L9iAK8oYWiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYiZEYrwPbPovGAU/teAiZAAAAAElFTkSuQmCC",
+      "base64",
+    ),
+  });
+  const image = page.locator(".ck-content img");
+  await expect(image).toHaveAttribute("width", "80");
+  await expect(image).toHaveAttribute("height", "40");
+  await image.click();
+  const preferences = await imagePreferences(page);
+  await preferences.getByLabel("Width", { exact: true }).fill("50");
+  await choose(page, "Width unit", "%");
+  await preferences.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(image).toHaveCSS("aspect-ratio", "80 / 40");
+  const resized = await getHtml(page);
+  expect(resized).toContain("aspect-ratio:80/40");
+  expect(resized).toContain("width:50%");
+  await source(page, resized);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "Save template" }).click();
+  await expect(
+    page.getByText("Saved to backend", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await settled(page);
+  expect(await getHtml(page)).toBe(resized);
+  const [response, download] = await Promise.all([
+    page.waitForResponse((response) =>
+      response.url().endsWith("/api/pdf/render"),
+    ),
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Export PDF" }).click(),
+  ]);
+  expect(response.status()).toBe(200);
+  expect(
+    (await readFile(await download.path())).subarray(0, 5).toString(),
+  ).toBe("%PDF-");
+});
+
+test("image preferences validate, cancel and apply all settings in one undo step", async ({
+  page,
+}) => {
+  await source(
+    page,
+    `<p>Before</p><figure class="image"><img src="${WIDE_IMAGE}" width="80" height="40" alt="Existing description"><figcaption><strong>Original caption</strong></figcaption></figure><figure class="image"><img src="${WIDE_IMAGE}" width="80" height="40" alt="Other image"></figure><p>After</p>`,
+  );
+  const original = await getHtml(page);
+  let dialog = await imagePreferences(page);
+  await expect(
+    dialog.getByLabel("Alternative text", { exact: true }),
+  ).toHaveValue("Existing description");
+  await dialog
+    .getByLabel("Alternative text", { exact: true })
+    .fill("Canceled change");
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+
+  dialog = await imagePreferences(page);
+  await dialog.getByLabel("Width", { exact: true }).fill("-5");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("greater than zero");
+  await expect(dialog.getByLabel("Width", { exact: true })).toBeFocused();
+  await dialog.getByLabel("Width", { exact: true }).fill("120");
+  await choose(page, "Width unit", "%");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("100% or less");
+  await choose(page, "Width unit", "px");
+  await choose(page, "Layout", "Wrap text");
+  await dialog
+    .getByLabel("Alternative text", { exact: true })
+    .fill("Red rectangle");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".ck-content")).toBeFocused();
+  const first = page.locator(".ck-content figure.image").first();
+  await expect(first).toHaveClass(/image-style-side/);
+  await expect(first).toHaveCSS("width", "120px");
+  await expect(first.locator("img")).toHaveAttribute("alt", "Red rectangle");
+  await expect(first.locator("figcaption strong")).toHaveText(
+    "Original caption",
+  );
+  await expect(page.locator(".ck-content img").nth(1)).toHaveAttribute(
+    "alt",
+    "Other image",
+  );
+  const applied = await getHtml(page);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  expect(await getHtml(page)).toBe(applied);
+  dialog = await imagePreferences(page);
+  await expect(dialog.getByLabel("Width", { exact: true })).toHaveValue("120");
+  await dialog.getByLabel("Width", { exact: true }).fill("200");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  expect(await getHtml(page)).toBe(applied);
+});
+
+test("image preferences switch layouts and reset the width", async ({
+  page,
+}) => {
+  await source(
+    page,
+    `<p>Before</p><figure class="image image_resized" style="width:50%;"><img src="${WIDE_IMAGE}" width="80" height="40"></figure><p>After</p>`,
+  );
+  const original = await getHtml(page);
+  let dialog = await imagePreferences(page);
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+  dialog = await imagePreferences(page);
+  await choose(page, "Layout", "Inline with text");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.locator(".ck-content .image-inline")).toHaveCount(1);
+  await expect(page.locator(".ck-content figcaption")).toHaveCount(0);
+  dialog = await imagePreferences(page);
+  await choose(page, "Layout", "On its own line");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.locator(".ck-content figure.image")).toHaveCount(1);
+  expect(await getHtml(page)).toContain("width:50%");
+  dialog = await imagePreferences(page);
+  await dialog.getByLabel("Width", { exact: true }).fill("");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  expect(await getHtml(page)).not.toContain("width:50%");
+});
+
+test("image preferences preserve imported widths and layouts until edited", async ({
+  page,
+}) => {
+  await source(
+    page,
+    `<figure class="image image_resized image-style-align-left" style="width:80mm;"><img src="${WIDE_IMAGE}" width="80" height="40" alt="Imported"><figcaption><strong>Rich caption</strong></figcaption></figure><p>After</p>`,
+  );
+  const original = await getHtml(page);
+  expect(original).toContain("width:80mm");
+  let dialog = await imagePreferences(page);
+  await expect(
+    dialog.getByRole("combobox", { name: "Layout", exact: true }),
+  ).toHaveText("Current layout");
+  await expect(
+    dialog.getByRole("combobox", { name: "Width unit", exact: true }),
+  ).toHaveText("px");
+  expect(
+    Number(await dialog.getByLabel("Width", { exact: true }).inputValue()),
+  ).toBeGreaterThan(0);
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+  dialog = await imagePreferences(page);
+  await dialog
+    .getByLabel("Alternative text", { exact: true })
+    .fill("Updated description");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  const applied = await getHtml(page);
+  expect(applied).toContain("width:80mm");
+  expect(applied).toContain("image-style-align-left");
+  expect(applied).toContain("<strong>Rich caption</strong>");
+  expect(applied).toContain('alt="Updated description"');
+});
+
+test("image popover supports keyboard navigation, removal and compact screens", async ({
+  page,
+}) => {
+  await source(
+    page,
+    `<p>Before</p><figure class="image"><img src="${WIDE_IMAGE}" width="80" height="40"></figure><p>After</p>`,
+  );
+  const original = await getHtml(page);
+  await page.locator(".ck-content img").click();
+  const toolbar = page.getByRole("toolbar", {
+    name: "Image toolbar",
+    exact: true,
+  });
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByRole("button")).toHaveCount(2);
+  await expect(
+    page.getByRole("button", { name: "Resize image", exact: true }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Alt+F10");
+  await expect(
+    toolbar.getByRole("button", { name: "Image preferences", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    toolbar.getByRole("button", { name: "Remove image", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".ck-content")).toBeFocused();
+  await page.locator(".ck-content > p").first().click();
+  await page.locator(".ck-content img").click();
+  await toolbar
+    .getByRole("button", { name: "Remove image", exact: true })
+    .click();
+  await expect(page.locator(".ck-content img")).toHaveCount(0);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+
+  await page.setViewportSize({ width: 360, height: 640 });
+  const dialog = await imagePreferences(page);
+  const bounds = await dialog.boundingBox();
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(360);
+  await expect(
+    dialog.getByRole("switch", { name: "Show caption" }),
+  ).toHaveCount(0);
+  await expect(dialog.getByLabel("Caption", { exact: true })).toHaveCount(0);
+  await expect(dialog.locator("img")).toHaveCount(0);
+  await expect(
+    dialog.getByRole("button", { name: "Apply", exact: true }),
+  ).toBeInViewport();
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+});
+
+test("Source Format indents nested HTML without changing content and is repeatable", async ({
+  page,
+}) => {
+  const compact =
+    '<blockquote><p>First <strong>bold</strong> <em>second</em> &lt;tag&gt; &amp; last</p></blockquote><figure class="table"><table><tbody><tr><td><p>Cell <a href="https://example.com" title="A > B">link</a></p></td><td>Other cell</td></tr></tbody></table></figure><ul><li>One <strong>two</strong> <em>three</em></li><li><p>Nested</p><ul><li>Item</li></ul></li></ul><div data-page-break="true"></div><p>After</p>';
+  await source(page, compact);
+  const original = await getHtml(page);
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "Document HTML" });
+  await input.fill(compact);
+  await page.getByRole("button", { name: "Format", exact: true }).click();
+  const formatted = await input.inputValue();
+  expect(formatted).toContain(
+    '<figure class="table">\n  <table>\n    <tbody>\n      <tr>\n        <td>\n          <p>Cell <a href="https://example.com" title="A &gt; B">link</a></p>\n        </td>\n        <td>Other cell</td>\n      </tr>\n    </tbody>\n  </table>\n</figure>',
+  );
+  expect(formatted).toContain(
+    "<blockquote>\n  <p>First <strong>bold</strong> <em>second</em> &lt;tag&gt; &amp; last</p>\n</blockquote>",
+  );
+  expect(formatted).toContain(
+    "  <li>One <strong>two</strong> <em>three</em></li>",
+  );
+  expect(formatted).toContain(
+    "  <li>\n    <p>Nested</p>\n    <ul>\n      <li>Item</li>\n    </ul>\n  </li>",
+  );
+  await page.getByRole("button", { name: "Format", exact: true }).click();
+  await expect(input).toHaveValue(formatted);
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await getHtml(page)).toBe(original);
+  await expect(page.locator(".ck-content blockquote p")).toHaveText(
+    "First bold second <tag> & last",
+  );
+});
+
+test("Source Format preserves inline fragments, mixed content, and non-breaking spaces", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "Document HTML" });
+  const examples = [
+    [
+      '<strong>First</strong> <em>second</em>&nbsp;<a href="https://example.com">third</a>',
+      '<strong>First</strong> <em>second</em>&nbsp;<a href="https://example.com">third</a>',
+    ],
+    [
+      "<div><p>First</p>&nbsp;<p>Second</p></div>",
+      "<div><p>First</p>&nbsp;<p>Second</p></div>",
+    ],
+    [
+      "<ul><li>Parent <ul><li>Nested</li></ul> tail</li></ul>",
+      "<ul>\n  <li>Parent <ul><li>Nested</li></ul> tail</li>\n</ul>",
+    ],
+    [
+      "<p>Line<br> two<strong>three</strong> <em>four</em></p>",
+      "<p>Line<br> two<strong>three</strong> <em>four</em></p>",
+    ],
+    [
+      "<div><!--Section--><p>First &amp; second</p></div>",
+      "<div>\n  <!--Section-->\n  <p>First &amp; second</p>\n</div>",
+    ],
+  ];
+  for (const [compact, formatted] of examples) {
+    await input.fill(compact);
+    await page.getByRole("button", { name: "Format", exact: true }).click();
+    await expect(input).toHaveValue(formatted);
+    await page.getByRole("button", { name: "Format", exact: true }).click();
+    await expect(input).toHaveValue(formatted);
+  }
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+});
+
 test("invalid source is blocked and formatting preserves spaces and entities", async ({
   page,
 }) => {
@@ -158,6 +465,13 @@ test("invalid source is blocked and formatting preserves spaces and entities", a
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("alert")).toContainText(
     "Unsupported HTML element",
+  );
+  await page
+    .getByRole("textbox", { name: "Document HTML" })
+    .fill('<p style="aspect-ratio:1/0;">Invalid ratio</p>');
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Unsupported CSS property or value: aspect-ratio",
   );
   await page
     .getByRole("textbox", { name: "Document HTML" })
@@ -169,6 +483,537 @@ test("invalid source is blocked and formatting preserves spaces and entities", a
   await expect(page.locator(".ck-content")).toHaveText(
     "First bold second <tag> & last",
   );
+});
+
+test("custom table properties validate, cancel, apply and undo as one change", async ({
+  page,
+}) => {
+  await source(
+    page,
+    '<figure class="table"><table><tbody><tr><td>First cell</td><td>Second cell</td></tr></tbody></table><figcaption>Existing caption</figcaption></figure>',
+  );
+  const original = await getHtml(page);
+  async function openProperties() {
+    await page.locator(".ck-content td").first().click();
+    await expect(
+      page.getByRole("button", { name: "Toggle caption", exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Table properties", exact: true })
+      .click();
+    return page.getByRole("dialog", { name: "Table properties", exact: true });
+  }
+
+  let dialog = await openProperties();
+  await expect(
+    dialog.getByRole("switch", { name: "Border", exact: true }),
+  ).toBeChecked();
+  await expect(dialog.getByLabel("Border width", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(dialog.getByLabel("Width", { exact: true })).toHaveValue("100");
+  await expect(
+    dialog.getByRole("combobox", { name: "Width unit", exact: true }),
+  ).toHaveText("%");
+  await dialog.getByLabel("Width", { exact: true }).fill("50");
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+
+  dialog = await openProperties();
+  await dialog.getByLabel("Width", { exact: true }).fill("-20");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("non-negative size");
+  await expect(dialog.getByLabel("Width", { exact: true })).toBeFocused();
+  await dialog.getByLabel("Width", { exact: true }).fill("65");
+  await dialog.getByLabel("Height", { exact: true }).fill("35");
+  await choose(page, "Height unit", "%");
+  await choose(page, "Table alignment", "Left");
+  await choose(page, "Border style", "Dashed");
+  const borderSwitch = dialog.getByRole("switch", {
+    name: "Border",
+    exact: true,
+  });
+  await borderSwitch.click();
+  await expect(borderSwitch).not.toBeChecked();
+  await expect(
+    dialog.getByRole("combobox", { name: "Border style", exact: true }),
+  ).toBeDisabled();
+  await borderSwitch.focus();
+  await page.keyboard.press("Space");
+  await expect(borderSwitch).toBeChecked();
+  await expect(
+    dialog.getByRole("combobox", { name: "Border style", exact: true }),
+  ).toHaveText("Dashed");
+  await dialog
+    .getByRole("group", { name: "Border color presets" })
+    .getByRole("button", { name: "Slate", exact: true })
+    .click();
+  await dialog
+    .getByRole("group", { name: "Background color presets" })
+    .getByRole("button", { name: "Light blue", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const applied = await getHtml(page);
+  expect(applied).toContain("width:65%");
+  expect(applied).toContain("height:35%");
+  expect(applied).toContain("float:left");
+  await expect(page.locator(".ck-content table")).toHaveCSS(
+    "border-top-style",
+    "dashed",
+  );
+  await expect(page.locator(".ck-content table")).toHaveCSS(
+    "border-top-width",
+    "1px",
+  );
+  expect(applied).toContain("background-color:#dbeafe");
+  expect(applied).toContain("Existing caption");
+
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  expect(await getHtml(page)).toBe(applied);
+
+  dialog = await openProperties();
+  await expect(dialog.getByLabel("Width", { exact: true })).toHaveValue("65");
+  await dialog.getByLabel("Width", { exact: true }).fill("90");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  expect(await getHtml(page)).toBe(applied);
+  await page.getByRole("button", { name: "Save template" }).click();
+  await expect(page.getByRole("status").first()).toContainText("Saved");
+  await page.reload();
+  await settled(page);
+  expect(await getHtml(page)).toBe(applied);
+});
+
+test("custom cell properties apply to the selected cell and restore editing focus", async ({
+  page,
+}) => {
+  await source(
+    page,
+    "<table><tbody><tr><td>Selected cell</td><td>Untouched cell</td></tr></tbody></table>",
+  );
+  const first = page.locator(".ck-content td").first();
+  await first.click();
+  await page
+    .getByRole("button", { name: "Cell properties", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Cell properties",
+    exact: true,
+  });
+  await choose(page, "Horizontal alignment", "Right");
+  await choose(page, "Vertical alignment", "Top");
+  await dialog.getByLabel("Height", { exact: true }).fill("50");
+  await expect(
+    dialog.getByRole("combobox", { name: "Height unit", exact: true }),
+  ).toHaveText("px");
+  await dialog.getByLabel("Width", { exact: true }).fill("30");
+  await choose(page, "Width unit", "%");
+  await dialog.getByLabel("Cell padding", { exact: true }).fill("12");
+  await dialog.getByRole("switch", { name: "Border", exact: true }).click();
+  await expect(
+    dialog.getByRole("switch", { name: "Border", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    dialog.getByRole("combobox", { name: "Border style", exact: true }),
+  ).toBeDisabled();
+  await expect(dialog.getByLabel("Border width", { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(
+    dialog
+      .getByRole("group", { name: "Border color presets" })
+      .getByRole("button", { name: "Black", exact: true }),
+  ).toBeDisabled();
+  await expect(dialog.getByRole("textbox", { name: /color/i })).toHaveCount(0);
+  await dialog
+    .getByRole("group", { name: "Background color presets" })
+    .getByRole("button", { name: "Light green", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(first).toBeFocused();
+  await expect(first).toHaveCSS("padding-top", "12px");
+  await expect(first).toHaveCSS("vertical-align", "top");
+  await expect(first).toHaveCSS("text-align", "right");
+  await expect(first).toHaveCSS("background-color", "rgb(220, 252, 231)");
+  const html = await getHtml(page);
+  expect(html).toContain("height:50px");
+  expect(html).toContain("width:30%");
+  expect(html).toContain("padding:12px");
+  expect(html).toContain("border-style:none");
+  const untouched = await page
+    .locator(".ck-content td")
+    .nth(1)
+    .getAttribute("style");
+  expect(untouched ?? "").not.toContain("12px");
+  expect(untouched ?? "").not.toContain("#dcfce7");
+  await first.click();
+  await page
+    .getByRole("button", { name: "Cell properties", exact: true })
+    .click();
+  await expect(
+    dialog.getByRole("switch", { name: "Border", exact: true }),
+  ).not.toBeChecked();
+  await dialog.getByRole("switch", { name: "Border", exact: true }).click();
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(first).toHaveCSS("border-top-style", "solid");
+  await expect(first).toHaveCSS("border-top-width", "1px");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(html);
+});
+
+test("custom table properties preserve imported styles and switch dimension units", async ({
+  page,
+}) => {
+  await source(
+    page,
+    '<figure class="table" style="width:80mm;height:2cm;"><table style="border-style:groove;border-width:4px;border-color:#123abc;background-color:#fedcba;"><tbody><tr><td>Imported table</td></tr></tbody></table></figure>',
+  );
+  const original = await getHtml(page);
+  expect(original).toContain("width:80mm");
+  expect(original).toContain("height:2cm");
+  async function openProperties() {
+    await page.locator(".ck-content td").first().click();
+    await page
+      .getByRole("button", { name: "Table properties", exact: true })
+      .click();
+    return page.getByRole("dialog", { name: "Table properties", exact: true });
+  }
+  let dialog = await openProperties();
+  expect(
+    Number(await dialog.getByLabel("Width", { exact: true }).inputValue()),
+  ).toBeGreaterThan(0);
+  await expect(
+    dialog.getByRole("combobox", { name: "Width unit", exact: true }),
+  ).toHaveText("px");
+  await expect(
+    dialog.getByRole("combobox", { name: "Border style", exact: true }),
+  ).toHaveText("Custom");
+  await expect(
+    dialog
+      .getByRole("group", { name: "Border color presets" })
+      .getByRole("button", { pressed: true }),
+  ).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+  dialog = await openProperties();
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.locator(".ck-content table")).toHaveCSS(
+    "border-top-width",
+    "1px",
+  );
+  await expect(page.locator(".ck-content table")).toHaveCSS(
+    "border-top-style",
+    "groove",
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+
+  dialog = await openProperties();
+  await dialog.getByLabel("Width", { exact: true }).fill("220");
+  await dialog.getByLabel("Height", { exact: true }).fill("25");
+  await choose(page, "Height unit", "%");
+  await dialog
+    .getByRole("combobox", { name: "Border style", exact: true })
+    .click();
+  await expect(page.getByRole("option")).toHaveText([
+    "Solid",
+    "Dashed",
+    "Dotted",
+    "Double",
+  ]);
+  await page.getByRole("option", { name: "Solid", exact: true }).click();
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  const applied = await getHtml(page);
+  expect(applied).toContain("width:220px");
+  expect(applied).toContain("height:25%");
+  expect(applied).toContain("border-style:solid");
+  expect(applied).toContain("border-color:#123abc");
+  expect(applied).toContain("background-color:#fedcba");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+});
+
+test("custom cell properties preserve mixed values and clear selected cell backgrounds", async ({
+  page,
+}) => {
+  await source(
+    page,
+    '<table><tbody><tr><td style="width:20%;background-color:#dbeafe;padding:4px;border-style:none;">Blue cell</td><td style="width:30%;background-color:#dcfce7;padding:8px;border-style:dashed;">Green cell</td><td>Other cell</td></tr></tbody></table>',
+  );
+  const original = await getHtml(page);
+  async function selectCells() {
+    await page.locator(".ck-content td").first().click();
+    await page
+      .locator(".document-editable-host > .ck-content")
+      .evaluate((editable) => {
+        const editor = editable.ckeditorInstance;
+        const cells = editor.plugins
+          .get("TableUtils")
+          .getSelectionAffectedTableCells(editor.model.document.selection);
+        editor.plugins
+          .get("TableSelection")
+          .setCellSelection(cells[0], cells[0].nextSibling);
+      });
+    await page
+      .getByRole("button", { name: "Cell properties", exact: true })
+      .click();
+    return page.getByRole("dialog", { name: "Cell properties", exact: true });
+  }
+  let dialog = await selectCells();
+  await expect(dialog).toContainText("2 selected cells");
+  await expect(
+    dialog.getByLabel("Cell padding", { exact: true }),
+  ).toHaveAttribute("placeholder", "Mixed");
+  await expect(dialog.getByLabel("Width", { exact: true })).toHaveAttribute(
+    "placeholder",
+    "Mixed",
+  );
+  await expect(
+    dialog
+      .getByRole("group", { name: "Background color presets" })
+      .getByRole("button", { pressed: true }),
+  ).toHaveCount(0);
+  await expect(
+    dialog
+      .getByRole("region", { name: "Background", exact: true })
+      .getByText("Mixed", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByRole("switch", { name: "Border", exact: true }),
+  ).not.toBeChecked();
+  await expect(
+    dialog.getByRole("combobox", { name: "Border style", exact: true }),
+  ).toHaveText("Mixed");
+  await choose(page, "Width unit", "%");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+
+  dialog = await selectCells();
+  await dialog.getByRole("button", { name: "Clear", exact: true }).click();
+  await dialog.getByLabel("Cell padding", { exact: true }).fill("10px");
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  const cells = page.locator(".ck-content td");
+  for (const index of [0, 1]) {
+    await expect(cells.nth(index)).toHaveCSS("padding-top", "10px");
+    await expect(cells.nth(index)).toHaveCSS(
+      "background-color",
+      "rgba(0, 0, 0, 0)",
+    );
+  }
+  expect((await cells.nth(2).getAttribute("style")) ?? "").not.toContain(
+    "10px",
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+  dialog = await selectCells();
+  await dialog.getByRole("switch", { name: "Border", exact: true }).click();
+  await dialog.getByRole("button", { name: "Apply", exact: true }).click();
+  for (const index of [0, 1]) {
+    await expect(cells.nth(index)).toHaveCSS("border-top-style", "solid");
+    await expect(cells.nth(index)).toHaveCSS("border-top-width", "1px");
+  }
+  expect((await cells.nth(2).getAttribute("style")) ?? "").not.toContain(
+    "border",
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(original);
+});
+
+test("table contextual menus keep their anchor and run row and column actions", async ({
+  page,
+}) => {
+  await source(
+    page,
+    "<table><tbody><tr><td>First</td><td>Second</td></tr><tr><td>Third</td><td>Fourth</td></tr></tbody></table>",
+  );
+  const cells = page.locator(".ck-content td");
+  const toolbar = page.getByRole("toolbar", {
+    name: "Table toolbar",
+    exact: true,
+  });
+  await cells.first().click();
+  await toolbar.getByRole("button", { name: "Row", exact: true }).click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await expect(toolbar).toBeVisible();
+  await expect(
+    page.getByRole("menuitemcheckbox", { name: "Header row", exact: true }),
+  ).not.toBeChecked();
+  const menuBounds = await page.getByRole("menu").boundingBox();
+  const toolbarBounds = await toolbar.boundingBox();
+  expect(menuBounds.y).toBeGreaterThan(toolbarBounds.y);
+  await page
+    .getByRole("menuitem", { name: "Insert row below", exact: true })
+    .click();
+  await expect(page.locator(".ck-content tr")).toHaveCount(3);
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page
+        .locator(".ck-content")
+        .evaluate((element) => element.contains(document.activeElement)),
+    )
+    .toBe(true);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.locator(".ck-content tr")).toHaveCount(2);
+
+  await cells.first().click();
+  await toolbar.getByRole("button", { name: "Column", exact: true }).click();
+  await page
+    .getByRole("menuitem", { name: "Insert column right", exact: true })
+    .click();
+  await expect(
+    page.locator(".ck-content tr").first().locator("td"),
+  ).toHaveCount(3);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(cells).toHaveCount(4);
+
+  await cells.first().click();
+  await toolbar.getByRole("button", { name: "Row", exact: true }).click();
+  await page
+    .getByRole("menuitemcheckbox", { name: "Header row", exact: true })
+    .click();
+  await expect(page.locator(".ck-content thead th")).toHaveCount(2);
+  await toolbar.getByRole("button", { name: "Row", exact: true }).click();
+  await expect(
+    page.getByRole("menuitemcheckbox", { name: "Header row", exact: true }),
+  ).toBeChecked();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(
+    toolbar.getByRole("button", { name: "Row", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    toolbar.getByRole("button", { name: "Column", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect
+    .poll(() =>
+      page
+        .locator(".ck-content")
+        .evaluate((element) => element.contains(document.activeElement)),
+    )
+    .toBe(true);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+
+  await cells.nth(2).click();
+  await toolbar.getByRole("button", { name: "Row", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Delete row", exact: true }).click();
+  await expect(page.locator(".ck-content tr")).toHaveCount(1);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(page.locator(".ck-content tr")).toHaveCount(2);
+});
+
+test("table contextual merge menu reflects selection and supports merge and split", async ({
+  page,
+}) => {
+  await source(
+    page,
+    "<table><tbody><tr><td>First</td><td>Second</td></tr><tr><td>Third</td><td>Fourth</td></tr></tbody></table>",
+  );
+  const cells = page.locator(".ck-content td");
+  const merge = page.getByRole("button", { name: "Merge", exact: true });
+  await cells.first().click();
+  await merge.click();
+  await expect(
+    page.getByRole("menuitem", { name: "Merge selected cells", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("menuitem", { name: "Merge cell left", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("menuitem", { name: "Merge cell up", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("menuitem", { name: "Merge cell right", exact: true })
+    .click();
+  await expect(cells.first()).toHaveAttribute("colspan", "2");
+  await expect(cells.first()).toContainText("Second");
+  await expect(cells).toHaveCount(3);
+  await merge.click();
+  await page
+    .getByRole("menuitem", { name: "Split cell vertically", exact: true })
+    .click();
+  await expect(cells).toHaveCount(4);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(cells).toHaveCount(3);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(cells).toHaveCount(4);
+
+  await cells.first().click();
+  await page
+    .locator(".document-editable-host > .ck-content")
+    .evaluate((editable) => {
+      const editor = editable.ckeditorInstance;
+      const [cell] = editor.plugins
+        .get("TableUtils")
+        .getSelectionAffectedTableCells(editor.model.document.selection);
+      editor.plugins
+        .get("TableSelection")
+        .setCellSelection(cell, cell.nextSibling);
+    });
+  await merge.click();
+  await expect(
+    page.getByRole("menuitem", { name: "Merge selected cells", exact: true }),
+  ).toBeEnabled();
+  await page
+    .getByRole("menuitem", { name: "Merge selected cells", exact: true })
+    .click();
+  await expect(cells.first()).toHaveAttribute("colspan", "2");
+  await expect(cells).toHaveCount(3);
+});
+
+test("table contextual toolbar supports selecting the whole table and narrow screens", async ({
+  page,
+}) => {
+  await source(
+    page,
+    "<table><tbody><tr><td>First</td><td>Second</td></tr></tbody></table>",
+  );
+  await page.locator(".ck-content td").first().click();
+  await page
+    .locator(".document-editable-host > .ck-content")
+    .evaluate((editable) => {
+      const editor = editable.ckeditorInstance;
+      const table = editor.model.document.selection
+        .getFirstPosition()
+        .findAncestor("table");
+      editor.model.change((writer) => writer.setSelection(table, "on"));
+      editor.editing.view.focus();
+    });
+  const toolbar = page.getByRole("toolbar", {
+    name: "Table toolbar",
+    exact: true,
+  });
+  await expect(
+    toolbar.getByRole("button", { name: "Table properties", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    toolbar.getByRole("button", { name: "Cell properties", exact: true }),
+  ).toBeDisabled();
+  await toolbar
+    .getByRole("button", { name: "Table properties", exact: true })
+    .click();
+  await expect(
+    page.getByRole("dialog", { name: "Table properties", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.locator(".ck-content td").first().click();
+  await expect(toolbar).toBeVisible();
+  const bounds = await toolbar.boundingBox();
+  expect(bounds.width).toBeLessThanOrEqual(390);
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+  await toolbar.getByRole("button", { name: "Column", exact: true }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Select column", exact: true }),
+  ).toBeVisible();
+  await expect(toolbar).toBeVisible();
 });
 
 test("automatic pagination reflows without creating manual breaks or losing content", async ({
@@ -839,10 +1684,16 @@ test("visual page breaks, page deletion and undo preserve document content", asy
   await source(page, "<p>Alpha Beta</p>");
   await setCaret(page, 0, 6);
   await expect(
+    page.getByRole("button", { name: "Insert", exact: true }),
+  ).toHaveCount(0);
+  await expect(
     page.getByRole("button", { name: "Page break", exact: true }),
-  ).toBeHidden();
-  await page.getByRole("button", { name: "Insert", exact: true }).click();
-  await page.getByRole("button", { name: "Page break", exact: true }).click();
+  ).toHaveCount(0);
+  await page
+    .locator(".document-editable-host > .ck-content")
+    .evaluate((editable) => {
+      editable.ckeditorInstance.execute("insertPageBreak");
+    });
   await expect(page.locator(".page-frame")).toHaveCount(2);
   await expect(page.locator(".ck-content > p").first()).toHaveText(
     /^Alpha\s*$/,
@@ -850,7 +1701,7 @@ test("visual page breaks, page deletion and undo preserve document content", asy
   await expect(page.locator(".ck-content > p").last()).toHaveText("Beta");
   await expect(
     page.getByRole("button", { name: "Page break", exact: true }),
-  ).toBeHidden();
+  ).toHaveCount(0);
   // The document has one editable; move into the paragraph after the break.
   await page.locator(".ck-content > p").last().click();
   await page.keyboard.type("Next page");

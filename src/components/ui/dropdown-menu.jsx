@@ -11,11 +11,11 @@ const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup;
 
 const DropdownMenuContent = React.forwardRef(function DropdownMenuContent(
-  { className, sideOffset = 4, ...props },
+  { className, sideOffset = 4, container, ...props },
   ref,
 ) {
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={container}>
       <DropdownMenuPrimitive.Content
         ref={ref}
         sideOffset={sideOffset}
@@ -70,6 +70,35 @@ const DropdownMenuLabel = React.forwardRef(function DropdownMenuLabel(
   );
 });
 
+const DropdownMenuCheckboxItem = React.forwardRef(
+  function DropdownMenuCheckboxItem(
+    { className, children, checked, ...props },
+    ref,
+  ) {
+    return (
+      <DropdownMenuPrimitive.CheckboxItem
+        ref={ref}
+        checked={checked}
+        className={cn(
+          "relative flex cursor-default select-none items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-none transition-colors",
+          "focus:bg-accent focus:text-accent-foreground",
+          "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+          "[&_svg:not([class*='size-'])]:size-4",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+        <span className="absolute right-2 flex size-4 items-center justify-center">
+          <DropdownMenuPrimitive.ItemIndicator>
+            <CheckIcon />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+      </DropdownMenuPrimitive.CheckboxItem>
+    );
+  },
+);
+
 const DropdownMenuSeparator = React.forwardRef(function DropdownMenuSeparator(
   { className, ...props },
   ref,
@@ -98,6 +127,7 @@ export {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuCheckboxItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuShortcut,

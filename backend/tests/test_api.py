@@ -6,6 +6,7 @@ from PIL import Image
 from pypdf import PdfReader
 from app.main import create_app
 from app.services.pdf_service import restricted_fetcher
+from app.services.html_validation import HtmlValidationError, validate_html
 
 SETTINGS = {"pageSize": "A4", "orientation": "portrait", "margins": {"top": 20, "right": 20, "bottom": 20, "left": 20}}
 
@@ -117,6 +118,43 @@ def test_resized_tables_save_and_render_with_column_widths(client):
         assert len(pdf.pages) == 1
         assert 'Narrow column' in pdf.pages[0].extract_text()
         assert 'Wide column' in pdf.pages[0].extract_text()
+
+
+def test_resized_images_save_and_render_with_aspect_ratio(client):
+    output = io.BytesIO()
+    Image.new('RGB', (80, 40), 'red').save(output, format='PNG')
+    image = base64.b64encode(output.getvalue()).decode()
+    html = f'<figure class="image image_resized" style="width:50%;"><img src="data:image/png;base64,{image}" width="80" height="40" style="aspect-ratio:80/40;"></figure>'
+    created = client.post('/templates', json=body(html))
+    assert created.status_code == 201
+    record = created.json()
+    assert 'aspect-ratio:80/40' in record['html']
+    assert client.get(f"/templates/{record['id']}").json()['html'] == record['html']
+    for response in [
+        client.post('/pdf/render', json=body(html)),
+        client.post(f"/templates/{record['id']}/pdf"),
+    ]:
+        assert response.status_code == 200
+        pdf = PdfReader(io.BytesIO(response.content))
+        assert len(pdf.pages) == 1
+        assert len(pdf.pages[0].images) == 1
+
+
+@pytest.mark.parametrize('ratio', ['80/40', '16 / 9', '1.5', '.5 / 2.5', 'auto', 'auto 80 / 40'])
+def test_valid_image_aspect_ratios(ratio):
+    html = f'<p style="aspect-ratio:{ratio};">Example</p>'
+    assert f'aspect-ratio:{ratio}' in validate_html(html)
+
+
+@pytest.mark.parametrize('style', [
+    'aspect-ratio:0/1', 'aspect-ratio:1/0', 'aspect-ratio:-1/2', 'aspect-ratio:1/-2',
+    'aspect-ratio:16/9/3', 'aspect-ratio:1px/2', 'aspect-ratio:auto auto',
+    'aspect-ratio:url(file:///etc/passwd)', 'aspect-ratio:calc(16/9)',
+    'width:80/40',
+])
+def test_rejects_invalid_ratios_and_slashes_in_other_css(style):
+    with pytest.raises(HtmlValidationError):
+        validate_html(f'<p style="{style};">Example</p>')
 
 
 @pytest.mark.parametrize('url', ['file:///etc/passwd', 'http://localhost:8000', 'https://example.com/a.png', 'data:text/html;base64,AA=='])

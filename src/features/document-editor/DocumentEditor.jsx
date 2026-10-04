@@ -3,6 +3,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Workspace } from "./components/Workspace";
 import { PrintStyles } from "./components/PrintStyles";
 import { SourceCodeDialog } from "./components/SourceCodeDialog";
+import { TablePropertiesDialog } from "./components/TablePropertiesDialog";
+import { ImagePreferencesDialog } from "./components/ImagePreferencesDialog";
 import { VariablesPanel } from "./components/VariablesPanel";
 import { usePagedEditor } from "./hooks/usePagedEditor";
 import { DEFAULT_PAGE_SETTINGS } from "./lib/pageGeometry";
@@ -94,6 +96,20 @@ export function DocumentEditor({
           onClose={editor.closeSourceDialog}
           onSave={editor.saveSourceDialog}
         />
+        {editor.tablePropertiesDialog ? (
+          <TablePropertiesDialog
+            properties={editor.tablePropertiesDialog}
+            onClose={editor.closeTablePropertiesDialog}
+            onSave={editor.saveTablePropertiesDialog}
+          />
+        ) : null}
+        {editor.imagePreferencesDialog ? (
+          <ImagePreferencesDialog
+            properties={editor.imagePreferencesDialog}
+            onClose={editor.closeImagePreferencesDialog}
+            onSave={editor.saveImagePreferencesDialog}
+          />
+        ) : null}
       </div>
       <div
         className="print-document browser-print-document"

@@ -2,6 +2,8 @@ import { splitManualPages, EMPTY_PAGE_HTML } from "./pageHtml";
 import { validateHtml } from "./htmlSubset";
 import { DocumentPaginator } from "./DocumentPaginator";
 import { DocumentNavigation } from "./DocumentNavigation";
+import { readTableProperties, tablePropertyCommand } from "./tableProperties";
+import { readImageProperties, selectedImage } from "./imageProperties";
 
 /** One editable model for the entire document; pagination only changes its view. */
 export class PagedEditorController {
@@ -11,6 +13,8 @@ export class PagedEditorController {
     onChange,
     onPages,
     onSource,
+    onTableProperties,
+    onImagePreferences,
     onError,
     onLayout,
   }) {
@@ -20,6 +24,8 @@ export class PagedEditorController {
       onChange,
       onPages,
       onSource,
+      onTableProperties,
+      onImagePreferences,
       onError,
       onLayout,
     });
@@ -46,6 +52,22 @@ export class PagedEditorController {
       priority: "lowest",
     });
     editor.on("openSourceDialog", () => this.onSource(this.getHtml()));
+    editor.on("openTablePropertiesDialog", (_, kind) => {
+      this.tablePropertiesSelection = editor.model.createSelection(
+        editor.model.document.selection,
+      );
+      this.onTableProperties({ kind, ...readTableProperties(editor, kind) });
+    });
+    editor.on("openImagePreferencesDialog", () => {
+      const image = selectedImage(editor);
+      if (!image) return;
+      this.imagePreferencesSelection = editor.model.createSelection(
+        editor.model.document.selection,
+      );
+      this.imagePreferencesTarget = image;
+      const properties = readImageProperties(editor, image);
+      this.onImagePreferences(properties);
+    });
     editor.model.document.on("change:data", () => {
       if (this.disposed) return;
       this.commit();
@@ -164,6 +186,29 @@ export class PagedEditorController {
     this.editor.editing.view.focus();
   }
 
+  closeTableProperties() {
+    if (!this.editor || !this.tablePropertiesSelection) return;
+    this.editor.model.change((writer) =>
+      writer.setSelection(this.tablePropertiesSelection),
+    );
+    this.tablePropertiesSelection = null;
+    this.editor.editing.view.focus();
+  }
+
+  applyTableProperties(kind, changes) {
+    if (!this.editor || !this.tablePropertiesSelection) return;
+    this.editor.model.change((writer) => {
+      writer.setSelection(this.tablePropertiesSelection);
+      for (const [property, value] of Object.entries(changes)) {
+        this.editor.execute(tablePropertyCommand(kind, property), {
+          value: value.trim(),
+          batch: writer.batch,
+        });
+      }
+    });
+    this.closeTableProperties();
+  }
+
   async destroy() {
     this.disposed = true;
     this.domEvents.abort();
@@ -173,6 +218,41 @@ export class PagedEditorController {
     await this.editor?.destroy();
     editable?.remove();
     toolbar?.remove();
+  }
+
+  closeImagePreferences() {
+    if (!this.editor || !this.imagePreferencesSelection) return;
+    this.editor.model.change((writer) =>
+      writer.setSelection(this.imagePreferencesSelection),
+    );
+    this.imagePreferencesSelection = null;
+    this.imagePreferencesTarget = null;
+    this.editor.editing.view.focus();
+  }
+
+  applyImagePreferences(changes) {
+    const editor = this.editor;
+    if (!editor || !this.imagePreferencesTarget) return;
+    let image = this.imagePreferencesTarget;
+    editor.model.change((writer) => {
+      writer.setSelection(image, "on");
+      if (Object.hasOwn(changes, "layout")) {
+        editor.execute("imageStyle", {
+          value: changes.layout,
+          setImageSizes: false,
+        });
+        image = selectedImage(editor);
+      }
+      if (Object.hasOwn(changes, "width"))
+        editor.execute("resizeImage", { width: changes.width || null });
+      if (Object.hasOwn(changes, "alt"))
+        editor.execute("imageTextAlternative", { newValue: changes.alt });
+      writer.setSelection(image, "on");
+    });
+    // A layout change may replace the image model element. Keep the new
+    // selection instead of restoring a selection around the removed image.
+    this.imagePreferencesSelection = null;
+    this.imagePreferencesTarget = null;
   }
 }
 

@@ -76,6 +76,7 @@
     "font-style",
     "width",
     "height",
+    "aspect-ratio",
     "min-width",
     "max-width",
     "border",

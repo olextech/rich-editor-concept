@@ -36,11 +36,11 @@ const SelectTrigger = React.forwardRef(function SelectTrigger(
 });
 
 const SelectContent = React.forwardRef(function SelectContent(
-  { className, children, position = "popper", ...props },
+  { className, children, position = "popper", container, ...props },
   ref,
 ) {
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={container}>
       <SelectPrimitive.Content
         ref={ref}
         data-slot="select-content"

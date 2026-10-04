@@ -394,6 +394,29 @@ select {
     0 1px 3px oklch(0 0 0 / 0.06) !important;
 }
 
+/* Contextual balloons host the same React controls as the rest of the app. */
+.ck.ck-balloon-panel:has(.app-table-tools, .app-image-tools) {
+  --ck-color-panel-background: var(--color-popover);
+  --ck-color-panel-border: var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    0 4px 12px oklch(0 0 0 / 0.08),
+    0 1px 3px oklch(0 0 0 / 0.06);
+}
+
+.ck.ck-toolbar:has(.app-table-tools, .app-image-tools) {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--color-popover);
+}
+
+.ck.ck-toolbar:has(.app-table-tools, .app-image-tools) > .ck-toolbar__items,
+.ck.ck-toolbar > .ck-toolbar__items > :is(.app-table-tools, .app-image-tools) {
+  margin: 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* One editable document over the paper stack                          */
 /* ------------------------------------------------------------------ */

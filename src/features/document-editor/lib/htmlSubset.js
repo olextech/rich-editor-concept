@@ -80,15 +80,31 @@ function validateStyle(style) {
     const colon = declaration.indexOf(":");
     const property = declaration.slice(0, colon).trim().toLowerCase();
     const value = declaration.slice(colon + 1).trim();
+    const supportedValue =
+      property === "aspect-ratio"
+        ? isAspectRatio(value)
+        : /^[\w\s#.,%()'"+-]+$/.test(value) && !/(?:^|\s)-\d/.test(value);
     if (
       colon < 0 ||
       !contract.styles.includes(property) ||
       !value ||
-      !/^[\w\s#.,%()'"+-]+$/.test(value) ||
-      /(?:^|\s)-\d/.test(value)
+      !supportedValue
     )
       throw new Error(`Unsupported CSS property or value: ${property}.`);
     if (/[()]/.test(value) && !/^(rgba?|hsla?)\([\d\s.,%]+\)$/i.test(value))
       throw new Error("Only color functions are supported in CSS.");
   }
+}
+
+function isAspectRatio(value) {
+  if (value.toLowerCase() === "auto") return true;
+  const ratio = /^(?:auto\s+)?(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?$/i.exec(
+    value,
+  );
+  return (
+    Boolean(ratio) &&
+    [ratio[1], ratio[2] ?? "1"]
+      .map(Number)
+      .every((number) => Number.isFinite(number) && number > 0)
+  );
 }

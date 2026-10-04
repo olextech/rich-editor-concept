@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import math
 import re
 from pathlib import Path
 import html5lib
@@ -82,10 +83,18 @@ def validate_style(style):
     for declaration in filter(str.strip, style.split(";")):
         property, separator, value = declaration.partition(":")
         property, value = property.strip().lower(), value.strip()
-        if not separator or property not in CONTRACT["styles"] or not value or not re.fullmatch(r"[\w\s#.,%()'\"+-]+", value) or re.search(r"(?:^|\s)-\d", value):
+        supported_value = valid_aspect_ratio(value) if property == "aspect-ratio" else re.fullmatch(r"[\w\s#.,%()'\"+-]+", value) and not re.search(r"(?:^|\s)-\d", value)
+        if not separator or property not in CONTRACT["styles"] or not value or not supported_value:
             raise HtmlValidationError(f"Unsupported CSS property or value: {property}.")
         if re.search(r"[()]", value) and not re.fullmatch(r"(?:rgba?|hsla?)\([\d\s.,%]+\)", value, re.I):
             raise HtmlValidationError("Only color functions are supported in CSS.")
+
+
+def valid_aspect_ratio(value):
+    if value.lower() == "auto":
+        return True
+    ratio = re.fullmatch(r"(?:auto\s+)?(\d*\.?\d+)(?:\s*/\s*(\d*\.?\d+))?", value, re.I)
+    return bool(ratio) and all(math.isfinite(number) and number > 0 for number in (float(ratio[1]), float(ratio[2] or "1")))
 
 
 def validate_image(url):

@@ -11,7 +11,7 @@ import {
   Essentials,
   Heading,
   Image,
-  ImageCaption,
+  ImageCaptionEditing,
   ImageResize,
   ImageStyle,
   ImageToolbar,
@@ -21,9 +21,9 @@ import {
   Paragraph,
   Table,
   TableCaption,
-  TableCellProperties,
+  TableCellPropertiesEditing,
   TableColumnResize,
-  TableProperties,
+  TablePropertiesEditing,
   TableToolbar,
   ButtonView,
   Base64UploadAdapter,
@@ -32,8 +32,16 @@ import {
   FontColor,
   GeneralHtmlSupport,
   toWidget,
+  IconTableProperties,
+  IconTableCellProperties,
 } from "ckeditor5";
 import contract from "../../../../shared/html-contract.json";
+import {
+  TABLE_PROPERTY_DEFAULTS,
+  CELL_PROPERTY_DEFAULTS,
+} from "./tableProperties";
+import { TableContextTools } from "./TableContextTools";
+import { ImageContextTools } from "./ImageContextTools";
 
 export const editorType = DecoupledEditor;
 
@@ -110,6 +118,42 @@ class DocumentTools extends Plugin {
   }
 }
 
+class TablePropertyDialogs extends Plugin {
+  static get requires() {
+    return [TablePropertiesEditing, TableCellPropertiesEditing];
+  }
+
+  init() {
+    const editor = this.editor;
+    for (const [name, kind, label, icon, command] of [
+      [
+        "tableProperties",
+        "table",
+        "Table properties",
+        IconTableProperties,
+        "tableWidth",
+      ],
+      [
+        "tableCellProperties",
+        "cell",
+        "Cell properties",
+        IconTableCellProperties,
+        "tableCellWidth",
+      ],
+    ]) {
+      editor.ui.componentFactory.add(name, (locale) => {
+        const button = new ButtonView(locale);
+        button.set({ label, icon, tooltip: true });
+        button.bind("isEnabled").to(editor.commands.get(command), "isEnabled");
+        this.listenTo(button, "execute", () =>
+          editor.fire("openTablePropertiesDialog", kind),
+        );
+        return button;
+      });
+    }
+  }
+}
+
 export const editorConfig = {
   licenseKey: "GPL",
   plugins: [
@@ -131,16 +175,18 @@ export const editorConfig = {
     GeneralHtmlSupport,
     Table,
     TableToolbar,
+    TableContextTools,
     TableCaption,
-    TableProperties,
-    TableCellProperties,
+    TablePropertyDialogs,
     TableColumnResize,
     Image,
     ImageToolbar,
-    ImageCaption,
+    // Retain existing document captions without exposing caption controls.
+    ImageCaptionEditing,
     ImageStyle,
     ImageResize,
     ImageUpload,
+    ImageContextTools,
     Base64UploadAdapter,
   ],
   toolbar: {
@@ -160,11 +206,6 @@ export const editorConfig = {
       "insertTable",
       "uploadImage",
       "|",
-      {
-        label: "Insert",
-        icon: false,
-        items: ["insertPageBreak"],
-      },
       "sourceEditing",
       "undo",
       "redo",
@@ -207,26 +248,13 @@ export const editorConfig = {
       })),
   },
   table: {
-    contentToolbar: [
-      "tableColumn",
-      "tableRow",
-      "mergeTableCells",
-      "toggleTableCaption",
-      "tableProperties",
-      "tableCellProperties",
-    ],
-    tableProperties: { defaultProperties: { width: "100%" } },
+    contentToolbar: ["appTableTools"],
+    tableToolbar: ["appTableTools"],
+    tableProperties: { defaultProperties: TABLE_PROPERTY_DEFAULTS },
+    tableCellProperties: { defaultProperties: CELL_PROPERTY_DEFAULTS },
   },
   image: {
-    toolbar: [
-      "imageTextAlternative",
-      "toggleImageCaption",
-      "|",
-      "imageStyle:inline",
-      "imageStyle:block",
-      "imageStyle:side",
-      "resizeImage",
-    ],
+    toolbar: ["appImageTools"],
     upload: { types: ["png", "jpeg", "gif", "webp"] },
   },
 };
