@@ -43,7 +43,7 @@ The problem is not solved by adding a generic text editor. RO App needs a compon
 - Full Google Docs or Word Online parity.
 - Real-time collaboration.
 - Comments, suggestions, or review workflows.
-- Merge fields/placeholders in v1.
+- Production data binding and variables beyond the sample Company, Client, Invoice, and table fields.
 - Advanced document automation.
 - Freeform desktop-publishing layout.
 - Role/permission model for who can use the component.
@@ -180,6 +180,31 @@ The problem is not solved by adding a generic text editor. RO App needs a compon
   - `Safari`: unsupported for editing in v1
 - The component must be optimized and validated first against the fully supported browser baseline.
 - If a browser cannot maintain `Structural fidelity`, it must not be treated as fully supported.
+
+### 6.12 Company and Client variables
+
+- The variables panel must insert the five Company and five Client placeholders into the document at the cursor.
+- Browser print and both draft and saved PDF generation must replace those placeholders with shared sample values.
+- The editor, Source, drafts, and saved HTML must preserve the placeholders for reuse.
+- Substitution must operate on visible text, preserve inline formatting, and treat values as plain text.
+- Legal entity and unknown placeholders must remain unchanged. Production Company/Client data selection is outside this demo's scope.
+- Output pagination uses resolved values, so their length may change wrapping and automatic page boundaries. Explicit page breaks must be preserved.
+
+### 6.13 Table body and footer variables
+
+- The variables panel must provide Table body and Table footer groups.
+- Table body must provide Description, Qty, Rate, and Amount item placeholders. A body row containing item placeholders must repeat for each shared sample item during browser print and draft/saved PDF generation.
+- Table footer must provide Subtotal, Tax rate, Tax amount, and Total placeholders, using sample values consistent with the line items.
+- Canonical HTML must retain one template body row and footer placeholders. Rendering must preserve headers, column widths, cell formatting, and footer rows.
+- Connected rows with vertically merged cells must repeat together. Empty item lists must remove template rows while retaining static rows.
+- Output pagination must occur after row expansion and must honor manual page breaks.
+- Tables must use the current page's remaining space and continue across as many pages as needed, including 100+ items. Rows that fit on a page must remain intact, column headers must repeat, and footer totals must appear once after the final item.
+
+### 6.14 Invoice variables
+
+- The variables panel must provide an Invoice group with Invoice Number, Issue Date, and Due Date placeholders.
+- Browser print and draft/saved PDF generation must resolve these fields using shared sample values while canonical HTML retains placeholders.
+- The fresh Invoice example must use these placeholders in the header and the invoice number in its payment reference.
 
 ## 7. Non-Functional Requirements
 

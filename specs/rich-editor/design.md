@@ -332,6 +332,18 @@ Validation approach:
 - Backend validates again before save and before PDF render.
 - Unsafe tags and unsupported attributes are rejected, not silently executed.
 
+Variable rendering:
+
+- `shared/variable-values.json` supplies the five Company, five Client, and three Invoice sample values to the demo frontend and backend. The Invoice panel group inserts `{Invoice Number}`, `{Issue Date}`, and `{Due Date}` through the existing text-variable flow.
+- Canonical HTML retains placeholders such as `{Company Name}`. Saving never substitutes values.
+- Browser print resolves a separate copy of the canonical HTML; the PDF service resolves validated HTML before rendering.
+- Substitution operates on text nodes, supports tokens split across inline formatting, and never inserts HTML or changes attributes. Paragraphs, table cells, images, and line breaks delimit matching.
+- Unknown and Legal entity placeholders remain unchanged. Resolved text is paginated naturally, with explicit page breaks retained.
+- `shared/table-variables.json` supplies the item variable names, thirteen sample line items, and matching subtotal/tax/total values. The variables panel exposes separate Table body and Table footer groups.
+- Before text substitution, renderers copy each body row containing item variables once per item and bind that row to its item values. Connected rows with row spans are copied together. Header and footer rows remain outside repetition.
+- Both export paths paginate the expanded HTML. Canonical storage and the editing canvas retain the template row; no item data is written into saved templates.
+- Print styles allow both CKEditor table figures and their tables to fragment across pages. Rows avoid internal breaks, `thead` repeats as a table header group, and `tfoot` renders once as a non-repeating row group that avoids internal breaks.
+
 HTML subset for v1:
 
 - Basic text blocks: `p`, `div`, `span`, `strong`, `em`, `u`, headings
@@ -382,7 +394,7 @@ Storage strategy:
 ## Edge Cases
 
 - Content reflows to more or fewer pages after margin, size, or orientation changes; the editor and PDF output should both reflect the new flow.
-- Large tables may move to the next page or split imperfectly depending on CSS constraints; v1 prioritizes structural fidelity over pixel-perfect table pagination.
+- Large tables use the current page's remaining space and continue between rows, with repeated column headers and totals after the final item. A row taller than a printable page may need to fragment.
 - Large images are constrained to page content width to reduce clipping in PDF output.
 - A manual page break next to natural overflow still forces a break at the explicit marker.
 - Unsupported HTML pasted into source mode blocks save and PDF export until corrected.

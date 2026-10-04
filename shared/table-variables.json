@@ -1,0 +1,94 @@
+{
+  "bodyVariables": [
+    "{Item Description}",
+    "{Item Qty}",
+    "{Item Rate}",
+    "{Item Amount}"
+  ],
+  "footerValues": {
+    "{Subtotal}": "$17,237.00",
+    "{Tax Rate}": "20%",
+    "{Tax Amount}": "$3,447.40",
+    "{Total}": "$20,684.40"
+  },
+  "rows": [
+    {
+      "{Item Description}": "Brand identity refresh",
+      "{Item Qty}": "1",
+      "{Item Rate}": "$3,200.00",
+      "{Item Amount}": "$3,200.00"
+    },
+    {
+      "{Item Description}": "Marketing site redesign (12 pages)",
+      "{Item Qty}": "12",
+      "{Item Rate}": "$420.00",
+      "{Item Amount}": "$5,040.00"
+    },
+    {
+      "{Item Description}": "Design system handoff & documentation",
+      "{Item Qty}": "1",
+      "{Item Rate}": "$1,750.00",
+      "{Item Amount}": "$1,750.00"
+    },
+    {
+      "{Item Description}": "Website accessibility audit",
+      "{Item Qty}": "1",
+      "{Item Rate}": "$850.00",
+      "{Item Amount}": "$850.00"
+    },
+    {
+      "{Item Description}": "Landing page design",
+      "{Item Qty}": "3",
+      "{Item Rate}": "$360.00",
+      "{Item Amount}": "$1,080.00"
+    },
+    {
+      "{Item Description}": "Responsive layout testing",
+      "{Item Qty}": "8",
+      "{Item Rate}": "$95.00",
+      "{Item Amount}": "$760.00"
+    },
+    {
+      "{Item Description}": "Custom icon set",
+      "{Item Qty}": "24",
+      "{Item Rate}": "$18.00",
+      "{Item Amount}": "$432.00"
+    },
+    {
+      "{Item Description}": "Email newsletter template",
+      "{Item Qty}": "2",
+      "{Item Rate}": "$275.00",
+      "{Item Amount}": "$550.00"
+    },
+    {
+      "{Item Description}": "Product photography editing",
+      "{Item Qty}": "40",
+      "{Item Rate}": "$12.50",
+      "{Item Amount}": "$500.00"
+    },
+    {
+      "{Item Description}": "Content migration",
+      "{Item Qty}": "15",
+      "{Item Rate}": "$65.00",
+      "{Item Amount}": "$975.00"
+    },
+    {
+      "{Item Description}": "Analytics and conversion tracking",
+      "{Item Qty}": "1",
+      "{Item Rate}": "$480.00",
+      "{Item Amount}": "$480.00"
+    },
+    {
+      "{Item Description}": "Search engine optimization setup",
+      "{Item Qty}": "1",
+      "{Item Rate}": "$720.00",
+      "{Item Amount}": "$720.00"
+    },
+    {
+      "{Item Description}": "Post-launch support",
+      "{Item Qty}": "10",
+      "{Item Rate}": "$90.00",
+      "{Item Amount}": "$900.00"
+    }
+  ]
+}

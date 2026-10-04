@@ -1,5 +1,5 @@
-import EditorDemoPage from "./features/rich-editor/EditorDemoPage";
+import { TemplateEditorApp } from "./features/document-editor/TemplateEditorApp";
 
 export default function App() {
-  return <EditorDemoPage />;
+  return <TemplateEditorApp />;
 }

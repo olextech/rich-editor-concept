@@ -1,0 +1,110 @@
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
+from .db import Template, create_database, now
+from .schemas import Draft, TemplatePayload
+from .services import pdf_service, template_service
+from .services.html_validation import HtmlValidationError
+
+logger = logging.getLogger(__name__)
+
+
+def create_app(database_url=None):
+    database_url = database_url or os.environ.get("DATABASE_URL", f"sqlite:///{Path(__file__).resolve().parents[1] / 'templates.db'}")
+    engine, sessions = create_database(database_url)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        engine.dispose()
+
+    app = FastAPI(title="Paged template editor", lifespan=lifespan)
+    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"])
+
+    def session_dependency():
+        with sessions() as session:
+            yield session
+
+    def get_template(session, template_id):
+        row = session.get(Template, template_id)
+        if row is None:
+            raise HTTPException(404, "Template not found.")
+        return row
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_payload(request, error):
+        messages = [f"{'.'.join(str(p) for p in item['loc'][1:])}: {item['msg']}" for item in error.errors()]
+        return JSONResponse(status_code=400, content={"detail": "; ".join(messages)})
+
+    @app.exception_handler(HtmlValidationError)
+    async def invalid_html(request, error):
+        logger.info("HTML validation rejected: %s", error)
+        return JSONResponse(status_code=422, content={"detail": str(error)})
+
+    @app.exception_handler(SQLAlchemyError)
+    async def database_failure(request, error):
+        logger.exception("Database operation failed", exc_info=error)
+        return JSONResponse(status_code=500, content={"detail": "Template storage is unavailable."})
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    @app.get("/templates")
+    def list_templates(q: str = "", session=Depends(session_dependency)):
+        return template_service.list_templates(session, q)
+
+    @app.post("/templates", status_code=201)
+    def create_template(payload: TemplatePayload, session=Depends(session_dependency)):
+        row = template_service.assign(Template(created_at=now()), payload)
+        session.add(row)
+        session.commit()
+        logger.info("Created template %s (%s)", row.id, row.name)
+        return template_service.serialize(row)
+
+    @app.get("/templates/{template_id}")
+    def read_template(template_id: int, session=Depends(session_dependency)):
+        return template_service.serialize(get_template(session, template_id))
+
+    @app.put("/templates/{template_id}")
+    def update_template(template_id: int, payload: TemplatePayload, session=Depends(session_dependency)):
+        row = template_service.assign(get_template(session, template_id), payload)
+        session.commit()
+        logger.info("Updated template %s (%s)", row.id, row.name)
+        return template_service.serialize(row)
+
+    @app.delete("/templates/{template_id}", status_code=204)
+    def delete_template(template_id: int, session=Depends(session_dependency)):
+        session.delete(get_template(session, template_id))
+        session.commit()
+        logger.info("Deleted template %s", template_id)
+        return Response(status_code=204)
+
+    def pdf_response(payload):
+        try:
+            data = pdf_service.render_pdf(payload)
+        except HtmlValidationError:
+            raise
+        except Exception as error:
+            logger.exception("PDF generation failed")
+            raise HTTPException(500, "PDF rendering failed. Check the backend PDF dependencies.") from error
+        return Response(data, media_type="application/pdf", headers=pdf_service.pdf_headers(payload.name))
+
+    @app.post("/templates/{template_id}/pdf")
+    def saved_pdf(template_id: int, session=Depends(session_dependency)):
+        data = template_service.serialize(get_template(session, template_id))
+        return pdf_response(Draft(name=data["name"], html=data["html"], pageSettings=data["pageSettings"]))
+
+    @app.post("/pdf/render")
+    def draft_pdf(payload: Draft):
+        return pdf_response(payload)
+
+    return app
+
+app = create_app()

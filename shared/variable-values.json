@@ -1,0 +1,15 @@
+{
+  "{Company Name}": "Northwind Studio",
+  "{Company Address}": "12 Market Street, Kyiv, Ukraine",
+  "{Company Email}": "hello@northwind.example",
+  "{Company Details}": "Design & maintenance services. Registration no. NW-2048.",
+  "{Company Note}": "Thank you for choosing Northwind Studio.",
+  "{Client Name}": "Aurora Logistics LLC",
+  "{Client Address}": "88 Harbor Road, Lviv, Ukraine",
+  "{Client Email}": "accounts@aurora.example",
+  "{Client Details}": "Contact: Elena Kovalenko. Account no. CL-1042.",
+  "{Client Note}": "Please send invoices by email.",
+  "{Invoice Number}": "INV-2026-0042",
+  "{Issue Date}": "2026-05-16",
+  "{Due Date}": "2026-05-30"
+}
