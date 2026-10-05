@@ -114,6 +114,9 @@ test("blocks read-only edits, insertion, page changes, and source apply", async 
   await expect(
     dialog.getByRole("button", { name: "Apply", exact: true }),
   ).toBeDisabled();
+  await expect(
+    dialog.getByRole("button", { name: "Clean HTML", exact: true }),
+  ).toBeDisabled();
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   await page
     .getByRole("button", { name: "Toggle read only", exact: true })

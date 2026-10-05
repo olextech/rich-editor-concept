@@ -109,8 +109,10 @@ export function DocumentEditor({
           isOpen={editor.sourceDialog.isOpen}
           value={editor.sourceDialog.value}
           error={editor.sourceDialog.error}
+          status={editor.sourceDialog.status}
           onChange={editor.setSourceValue}
           onFormat={editor.formatSourceValue}
+          onClean={editor.cleanSourceValue}
           onClose={editor.closeSourceDialog}
           onSave={editor.saveSourceDialog}
           readOnly={readOnly}

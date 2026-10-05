@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PagedEditorController } from "../lib/PagedEditorController";
 import { DEFAULT_PAGE_SETTINGS, getPageMetrics } from "../lib/pageGeometry";
 import { formatHtmlSource } from "../lib/pageHtml";
+import { cleanHtml } from "../lib/htmlSubset";
 
 export function usePagedEditor({
   documentKey,
@@ -144,7 +145,13 @@ export function usePagedEditor({
     [],
   );
   const setSourceValue = useCallback(
-    (value) => setSourceDialog((current) => ({ ...current, value, error: "" })),
+    (value) =>
+      setSourceDialog((current) => ({
+        ...current,
+        value,
+        error: "",
+        status: "",
+      })),
     [],
   );
   const closeSourceDialog = useCallback(
@@ -157,9 +164,29 @@ export function usePagedEditor({
         ...current,
         value: formatHtmlSource(current.value),
         error: "",
+        status: "",
       })),
     [],
   );
+  const cleanSourceValue = useCallback(() => {
+    if (latest.current.readOnly) return;
+    setSourceDialog((current) => {
+      try {
+        const value = cleanHtml(current.value);
+        return {
+          ...current,
+          value,
+          error: "",
+          status:
+            value === current.value
+              ? "HTML already uses supported markup."
+              : "HTML cleaned. Review the code, then apply it.",
+        };
+      } catch (error) {
+        return { ...current, error: error.message, status: "" };
+      }
+    });
+  }, []);
   const saveSourceDialog = useCallback(() => {
     try {
       controllerRef.current?.applyHtml(sourceDialog.value);
@@ -205,6 +232,7 @@ export function usePagedEditor({
     sourceDialog,
     setSourceValue,
     formatSourceValue,
+    cleanSourceValue,
     closeSourceDialog,
     saveSourceDialog,
     tablePropertiesDialog,

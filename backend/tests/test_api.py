@@ -124,6 +124,24 @@ def test_resized_tables_save_and_render_with_column_widths(client):
     assert 'Wide column' in pdf.pages[0].extract_text()
 
 
+def test_cell_border_longhands_save_reload_and_render(client):
+    # CKEditor expands mixed cell borders into individual side properties.
+    style = ';'.join(
+        f'border-{side}-{property}:{value}'
+        for side in ('top', 'right', 'bottom', 'left')
+        for property, value in (('style', 'none'), ('width', '1px'), ('color', 'red'))
+    )
+    html = f'<table style="border-style:none"><tbody><tr><td style="{style}">Borderless cell</td></tr></tbody></table>'
+    created = client.post('/templates', json=body(html))
+    assert created.status_code == 201
+    record = created.json()
+    assert style in record['html']
+    assert client.get(f"/templates/{record['id']}").json()['html'] == record['html']
+    response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'demo-invoice'})
+    assert response.status_code == 200
+    assert 'Borderless cell' in PdfReader(io.BytesIO(response.content)).pages[0].extract_text()
+
+
 def test_resized_images_save_and_render_with_aspect_ratio(client):
     output = io.BytesIO()
     Image.new('RGB', (80, 40), 'red').save(output, format='PNG')

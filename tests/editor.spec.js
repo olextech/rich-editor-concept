@@ -543,6 +543,283 @@ test("invalid source is blocked and formatting preserves spaces and entities", a
   );
 });
 
+test("cleans legacy source for review before applying and preserves supported content", async ({
+  page,
+  request,
+}) => {
+  const before = await getHtml(page);
+  const legacy = `<section><p id="old" class="legacy" onclick="window.legacyRan = true">First <font face="Arial"><strong>bold</strong></font> &lt;tag&gt; &amp; last</p></section>
+<table border="1" cellpadding="4" cellspacing="0" class="table old-table" style="width:100%;border-collapse:collapse;position:absolute"><tbody><tr><td colspan="2" style="color:rgb(10, 20, 30);padding:4px;mso-padding-alt:0;">{Client Name}</td></tr></tbody></table>
+<script>window.legacyRan = true</script><style>p { display:none }</style><iframe src="https://example.com">Hidden iframe</iframe><template><p>Hidden template</p></template><!-- old comment -->`;
+  await source(page, legacy);
+  const dialog = page.getByRole("dialog", { name: "Source", exact: true });
+  const input = dialog.getByRole("textbox", { name: "Document HTML" });
+  await expect(dialog.getByRole("alert")).toBeVisible();
+  await dialog.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toHaveCount(0);
+  await expect(dialog.getByRole("status")).toHaveText(
+    "HTML cleaned. Review the code, then apply it.",
+  );
+  const cleaned = await input.inputValue();
+  expect(cleaned).toContain(
+    "First <strong>bold</strong> &lt;tag&gt; &amp; last",
+  );
+  expect(cleaned).toContain('class="table"');
+  expect(cleaned).toContain('style="width:100%;border-collapse:collapse"');
+  expect(cleaned).toContain('colspan="2"');
+  expect(cleaned).toContain('style="color:rgb(10, 20, 30);padding:4px"');
+  expect(cleaned).toContain("{Client Name}");
+  expect(cleaned).not.toMatch(
+    /section|font|border=|cellpadding|cellspacing|old-table|position|mso-|onclick|id=|script|iframe|template|<!--/,
+  );
+  expect(await page.evaluate(() => window.legacyRan)).toBeUndefined();
+  // Cleaning remains a source draft: Cancel must leave the document untouched.
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(await getHtml(page)).toBe(before);
+
+  // Both the existing Apply path and the backend contract accept the result.
+  const saved = await request.post("/api/templates", {
+    data: {
+      name: "Cleaned legacy HTML",
+      html: cleaned,
+      pageSettings: {
+        pageSize: "A4",
+        orientation: "portrait",
+        margins: { top: 20, right: 20, bottom: 20, left: 20 },
+      },
+    },
+  });
+  expect(saved.status()).toBe(201);
+  await source(page, cleaned);
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator(".ck-content strong")).toHaveText("bold");
+  await expect(page.locator(".ck-content td")).toHaveText("{Client Name}");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect(await getHtml(page)).toBe(before);
+});
+
+test("HTML cleanup converts legacy borderless tables to supported CSS", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "Document HTML" });
+  await input.fill(`<table border="0"><thead><tr><th style="padding:4px;border:2px solid blue">Header</th></tr></thead><tbody><tr><td>No border</td></tr></tbody><tfoot><tr><td style="border-left:1px solid red;background-color:yellow">Footer</td></tr></tfoot></table>
+<table style="width:100%;border:1px solid red;border-style:solid;position:absolute" border="0"><tbody><tr><td>Existing styles</td></tr></tbody></table>
+<table border="1"><tbody><tr><td>Default border</td></tr></tbody></table>
+<table style="border-style:none"><tbody><tr><td>Previously cleaned table</td></tr></tbody></table>`);
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  const cleaned = await input.inputValue();
+  expect(cleaned).toContain('<table style="border-style:none">');
+  expect(cleaned).toContain(
+    '<table style="width:100%;border:1px solid red;border-style:none">',
+  );
+  expect(cleaned).toContain("<table><tbody><tr><td>Default border</td>");
+  expect(cleaned).toContain(
+    '<th style="padding:4px;border:2px solid blue;border-style:none">Header</th>',
+  );
+  expect(cleaned).toContain(
+    '<td style="border-left:1px solid red;background-color:yellow;border-style:none">Footer</td>',
+  );
+  expect(cleaned).toContain(
+    '<td style="border-style:none">Previously cleaned table</td>',
+  );
+  expect(cleaned).not.toMatch(/border=|border-style:solid|position/);
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  await expect(input).toHaveValue(cleaned);
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator(".ck-content table").nth(0)).toHaveCSS(
+    "border-top-style",
+    "none",
+  );
+  await expect(page.locator(".ck-content table").nth(1)).toHaveCSS(
+    "border-top-style",
+    "none",
+  );
+  const cells = page.locator(".ck-content table").nth(0).locator("th, td");
+  await expect(cells).toHaveCount(3);
+  for (const cell of await cells.all()) {
+    expect(await cell.evaluate((node) => node.style.borderStyle)).toBe("none");
+  }
+  await expect(cells.nth(0)).toHaveCSS("padding-top", "4px");
+  await expect(cells.nth(2)).toHaveCSS("background-color", "rgb(255, 255, 0)");
+  await expect(
+    page.locator(".ck-content table").nth(2).locator("td"),
+  ).toHaveCSS("border-top-style", "solid");
+  // CKEditor draws dashed editing guides over borderless cells. Verify the
+  // canonical HTML with the output stylesheet, where those guides do not apply.
+  const outputBorders = await page.evaluate(
+    (html) => {
+      const output = document.createElement("div");
+      output.className = "print-document";
+      output.innerHTML = html;
+      document.querySelector(".papercraft-editor").append(output);
+      const borders = Array.from(output.querySelectorAll("table"), (table) =>
+        Array.from(table.querySelectorAll("th, td"), (cell) => {
+          const style = getComputedStyle(cell);
+          return [
+            style.borderTopStyle,
+            style.borderRightStyle,
+            style.borderBottomStyle,
+            style.borderLeftStyle,
+          ];
+        }),
+      );
+      output.remove();
+      return borders;
+    },
+    await getHtml(page),
+  );
+  expect(outputBorders).toEqual([
+    Array(3).fill(["none", "none", "none", "none"]),
+    [["none", "none", "none", "none"]],
+    [["solid", "solid", "solid", "solid"]],
+    [["none", "none", "none", "none"]],
+  ]);
+  await page.getByRole("button", { name: "Save template" }).click();
+  await expect(
+    page.getByText("Saved to backend", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await settled(page);
+  await expect(page.locator(".ck-content")).toContainText(
+    "Previously cleaned table",
+  );
+  const reloadedCells = page
+    .locator(".ck-content table")
+    .nth(0)
+    .locator("th, td");
+  await expect(reloadedCells).toHaveCount(3);
+  for (const cell of await reloadedCells.all()) {
+    expect(await cell.evaluate((node) => node.style.borderStyle)).toBe("none");
+  }
+});
+
+test("HTML cleanup removes table and cell border styles while keeping borderless tables", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "Document HTML" });
+  await input.fill(`<table style="width:100%;border-style:dashed;border-top-style:dotted;border-right-style:solid;border-bottom-style:double;border-left-style:groove;border-width:2px;border-color:red"><thead><tr><th style="BORDER-STYLE:solid;border-bottom-style:dotted;padding:4px">Header</th></tr></thead><tbody><tr><td style="border-style:dashed;border-top-style:solid;border-right-style:dotted;border-bottom-style:double;border-left-style:groove;background-color:yellow;border-left-width:2px;border-left-color:red">Body</td></tr></tbody></table>
+<table border="0" style="border-style:solid;border-bottom-style:double"><tbody><tr><td style="border-style:dotted;border-top-style:solid">Borderless</td></tr></tbody></table>
+<p style="border-style:dashed">Other content</p>`);
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  const cleaned = await input.inputValue();
+  expect(cleaned).toContain(
+    '<table style="width:100%;border-width:2px;border-color:red">',
+  );
+  expect(cleaned).toContain('<th style="padding:4px">Header</th>');
+  expect(cleaned).toContain(
+    '<td style="background-color:yellow;border-left-width:2px;border-left-color:red">Body</td>',
+  );
+  expect(cleaned).toContain(
+    '<table style="border-style:none"><tbody><tr><td style="border-style:none">Borderless</td>',
+  );
+  expect(cleaned).toContain('<p style="border-style:dashed">Other content</p>');
+  expect(cleaned).not.toMatch(
+    /border-(top|right|bottom|left)-style|border=|border-style:(solid|dotted|double|groove)/,
+  );
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  await expect(input).toHaveValue(cleaned);
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await page.getByRole("button", { name: "Save template" }).click();
+  await expect(
+    page.getByText("Saved to backend", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await settled(page);
+  await expect(page.locator(".ck-content table").nth(0)).toContainText("Body");
+  expect(
+    await page
+      .locator(".ck-content table")
+      .nth(1)
+      .locator("td")
+      .evaluate((cell) => cell.style.borderStyle),
+  ).toBe("none");
+});
+
+test("HTML cleanup removes table and cell heights while preserving image dimensions", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "Document HTML" });
+  await input.fill(`<figure class="table" style="width:80%;height:500px"><table border="0" height="400" style="width:100%;HEIGHT:400px;min-height:300px;max-height:600px"><thead style="height:100px"><tr style="height:100px"><th height="100" style="height:100px;padding:4px">Header</th></tr></thead><tbody style="height:200px"><tr height="200" style="height:200px"><td height="200" style="height:200px;background-color:yellow">Body</td></tr></tbody><tfoot style="height:100px"><tr style="height:100px"><td style="height:100px">Footer</td></tr></tfoot></table></figure>
+<p style="height:20px">Other content</p><figure class="image" style="height:40px"><img src="${WIDE_IMAGE}" width="80" height="40" style="height:40px" alt="Uploaded"></figure>`);
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  const cleaned = await input.inputValue();
+  const tableMarkup = cleaned.slice(0, cleaned.indexOf("</figure>") + 9);
+  expect(tableMarkup).not.toMatch(/height/i);
+  expect(tableMarkup).toContain('style="width:80%"');
+  expect(tableMarkup).toContain('style="width:100%;border-style:none"');
+  expect(tableMarkup).toContain('style="padding:4px;border-style:none"');
+  expect(tableMarkup).toContain(
+    'style="background-color:yellow;border-style:none"',
+  );
+  expect(cleaned).toContain('<p style="height:20px">Other content</p>');
+  expect(cleaned).toContain('<figure class="image" style="height:40px">');
+  expect(cleaned).toContain(
+    `<img src="${WIDE_IMAGE}" width="80" height="40" style="height:40px" alt="Uploaded">`,
+  );
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  await expect(input).toHaveValue(cleaned);
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.locator(".ck-content table")).toContainText("Body");
+  expect(
+    await page
+      .locator(".ck-content table")
+      .evaluate((table) => table.offsetHeight),
+  ).toBeLessThan(150);
+  await page.getByRole("button", { name: "Save template" }).click();
+  await expect(
+    page.getByText("Saved to backend", { exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await settled(page);
+  const tableHeights = await page
+    .locator(
+      ".ck-content .table, .ck-content table, .ck-content th, .ck-content td",
+    )
+    .evaluateAll((nodes) => nodes.map((node) => node.style.height));
+  expect(tableHeights.length).toBeGreaterThan(3);
+  expect(tableHeights.every((height) => height === "")).toBe(true);
+});
+
+test("HTML cleanup removes invalid values while retaining links, images, and page breaks", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Source", exact: true }).click();
+  const input = page.getByRole("textbox", { name: "Document HTML" });
+  await input.fill(`<p><a href="javascript:alert(1)" target="popup" rel="external">Bad link</a> <a href="https://example.com" target="_blank" rel="noopener">Good link</a></p>
+<p style="color:red;background-color:url(https://example.com/bg);margin:-2px;aspect-ratio:1/0">Keep text</p>
+<img src="https://example.com/image.png" onerror="alert(1)" width="bad" height="10001" alt="Remote"><img src="${WIDE_IMAGE}" width="80" height="40" alt="Uploaded">
+<div data-page-break="true"></div><p><span data-page-break="true"></span></p><div data-page-break="true">Keep marker text</div><div><div data-page-break="true"></div></div>`);
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  const cleaned = await input.inputValue();
+  expect(cleaned).toContain("<a>Bad link</a>");
+  expect(cleaned).toContain(
+    '<a href="https://example.com" target="_blank" rel="noopener">Good link</a>',
+  );
+  expect(cleaned).toContain('<p style="color:red">Keep text</p>');
+  expect(cleaned).toContain('<img alt="Remote">');
+  expect(cleaned).toContain(
+    `<img src="${WIDE_IMAGE}" width="80" height="40" alt="Uploaded">`,
+  );
+  expect(cleaned.match(/data-page-break="true"/g)).toHaveLength(2);
+  expect(cleaned).toContain("<div>Keep marker text</div>");
+  expect(cleaned).not.toMatch(
+    /javascript|onerror|url\(|aspect-ratio|margin|popup|external/,
+  );
+  await page.getByRole("button", { name: "Clean HTML", exact: true }).click();
+  await expect(input).toHaveValue(cleaned);
+  await expect(page.getByRole("dialog").getByRole("status")).toHaveText(
+    "HTML already uses supported markup.",
+  );
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+});
+
 test("custom table properties validate, cancel, apply and undo as one change", async ({
   page,
 }) => {

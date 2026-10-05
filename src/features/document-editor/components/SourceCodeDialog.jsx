@@ -6,9 +6,11 @@ export function SourceCodeDialog({
   value,
   onChange,
   onFormat,
+  onClean,
   onClose,
   onSave,
   error,
+  status,
   readOnly = false,
 }) {
   const titleId = useId();
@@ -71,10 +73,26 @@ export function SourceCodeDialog({
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2 border-t border-border px-4 py-3">
-        <Button variant="outline" onClick={onFormat} disabled={readOnly}>
-          Format
-        </Button>
+      {status && !error ? (
+        <p role="status" className="px-4 py-2 text-sm text-muted-foreground">
+          {status}
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onFormat} disabled={readOnly}>
+            Format
+          </Button>
+          <Button
+            variant="outline"
+            onClick={onClean}
+            disabled={readOnly}
+            title="Remove unsupported tags, attributes, classes, and CSS while keeping supported content"
+          >
+            Clean HTML
+          </Button>
+        </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={onClose}>
             Cancel
