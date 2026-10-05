@@ -6,15 +6,41 @@ import {
 } from "../lib/pageGeometry";
 import { validateHtml } from "../lib/htmlSubset";
 import { downloadPdf, templateApi } from "../lib/api";
+import { printPdf } from "../lib/printPdf";
 
 const STORAGE_KEY = "papercraft-drafts-v1";
 const clone = (value) => structuredClone(value);
-const snapshot = (template) =>
-  JSON.stringify({
-    name: template.label,
-    html: template.html,
-    pageSettings: template.pageSettings,
-  });
+const snapshots = new WeakMap();
+// The backend and CKEditor serialize attributes in different orders. Compare
+// markup structurally so loading an unchanged saved template stays clean.
+function normalizedHtml(html) {
+  const fragment = document.createElement("template");
+  fragment.innerHTML = html;
+  for (const element of fragment.content.querySelectorAll("*")) {
+    const attributes = [...element.attributes].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    for (const attribute of attributes) element.removeAttribute(attribute.name);
+    for (const attribute of attributes)
+      element.setAttribute(attribute.name, attribute.value);
+  }
+  return fragment.innerHTML;
+}
+function snapshot(template) {
+  // Template objects are updated immutably. Avoid parsing their HTML again
+  // when only a status message, busy state, or dialog has changed.
+  if (!snapshots.has(template)) {
+    snapshots.set(
+      template,
+      JSON.stringify({
+        name: template.label,
+        html: normalizedHtml(template.html),
+        pageSettings: template.pageSettings,
+      }),
+    );
+  }
+  return snapshots.get(template);
+}
 const payload = (template) => ({
   name: template.label,
   html: template.html,
@@ -37,6 +63,14 @@ function initialState() {
         ids.add(item.id);
         validateHtml(item.html);
         validatePageSettings(item.pageSettings);
+        if (item.savedSnapshot) {
+          const saved = JSON.parse(item.savedSnapshot);
+          item.savedSnapshot = snapshot({
+            label: saved.name,
+            html: saved.html,
+            pageSettings: saved.pageSettings,
+          });
+        }
       }
       return {
         templates: stored.templates,
@@ -54,12 +88,13 @@ function initialState() {
   };
 }
 
-export function useTemplates() {
+export function useTemplates({ documentId }) {
   const [state, setState] = useState(initialState);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [outputConfirmation, setOutputConfirmation] = useState(null);
   const stateRef = useRef(state);
   const busyRef = useRef(false);
   stateRef.current = state;
@@ -229,41 +264,70 @@ export function useTemplates() {
       setBusy(false);
     }
   }
+  async function saveTemplate(template) {
+    validateHtml(template.html);
+    validatePageSettings(template.pageSettings);
+    if (!template.label.trim())
+      throw new Error("Enter a template name before saving.");
+    const saved = await templateApi.save(template.serverId, payload(template));
+    setState((current) => ({
+      ...current,
+      templates: current.templates.map((t) =>
+        t.id === template.id
+          ? { ...t, serverId: saved.id, savedSnapshot: snapshot(template) }
+          : t,
+      ),
+    }));
+    return saved.id;
+  }
+  const currentTemplate = () =>
+    clone(
+      stateRef.current.templates.find(
+        (t) => t.id === stateRef.current.activeId,
+      ),
+    );
   const save = () =>
     run(async () => {
-      const template = clone(
-        stateRef.current.templates.find(
-          (t) => t.id === stateRef.current.activeId,
-        ),
-      );
-      validateHtml(template.html);
-      validatePageSettings(template.pageSettings);
-      if (!template.label.trim())
-        throw new Error("Enter a template name before saving.");
-      const saved = await templateApi.save(
-        template.serverId,
-        payload(template),
-      );
-      setState((current) => ({
-        ...current,
-        templates: current.templates.map((t) =>
-          t.id === template.id
-            ? { ...t, serverId: saved.id, savedSnapshot: snapshot(template) }
-            : t,
-        ),
-      }));
+      await saveTemplate(currentTemplate());
       setStatus("Saved to backend");
     });
-  const exportPdf = () =>
+  const generateOutput = ({ action, template, documentId, needsSave }) =>
     run(async () => {
-      const template = stateRef.current.templates.find(
-        (t) => t.id === stateRef.current.activeId,
+      const templateId = needsSave
+        ? await saveTemplate(template)
+        : template.serverId;
+      setStatus(
+        action === "print" ? "Preparing PDF for printing…" : "Preparing PDF…",
       );
-      validateHtml(template.html);
-      validatePageSettings(template.pageSettings);
-      downloadPdf(await templateApi.render(payload(template)), template.label);
-      setStatus("PDF exported");
+      const pdf = await templateApi.render({ templateId, documentId });
+      if (action === "print") {
+        await printPdf(pdf);
+        setStatus("Print dialog requested");
+      } else {
+        downloadPdf(pdf, template.label);
+        setStatus("PDF exported");
+      }
     });
+  const requestOutput = (action) => {
+    if (busyRef.current || outputConfirmation) return;
+    const template = currentTemplate();
+    const needsSave =
+      !template.serverId || snapshot(template) !== template.savedSnapshot;
+    const output = { action, template, documentId, needsSave };
+    setError("");
+    setStatus("");
+    if (needsSave) setOutputConfirmation(output);
+    else generateOutput(output);
+  };
+  const exportPdf = () => requestOutput("download");
+  const print = () => requestOutput("print");
+  const cancelOutput = () => setOutputConfirmation(null);
+  const confirmOutput = () => {
+    if (!outputConfirmation) return;
+    const output = outputConfirmation;
+    setOutputConfirmation(null);
+    generateOutput(output);
+  };
   const deleteTemplate = () =>
     run(async () => {
       const template = stateRef.current.templates.find(
@@ -303,6 +367,10 @@ export function useTemplates() {
     deleteTemplate,
     save,
     exportPdf,
+    print,
+    outputConfirmation,
+    cancelOutput,
+    confirmOutput,
     isDirty,
     busy,
     loading,

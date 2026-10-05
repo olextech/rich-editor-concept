@@ -8,8 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from .db import Template, create_database, now
-from .schemas import Draft, TemplatePayload
-from .services import pdf_service, template_service
+from .schemas import Draft, PdfRequest, TemplatePayload
+from .services import document_service, pdf_service, template_service
 from .services.html_validation import HtmlValidationError
 
 logger = logging.getLogger(__name__)
@@ -86,9 +86,9 @@ def create_app(database_url=None):
         logger.info("Deleted template %s", template_id)
         return Response(status_code=204)
 
-    def pdf_response(payload):
+    def pdf_response(payload, document):
         try:
-            data = pdf_service.render_pdf(payload)
+            data = pdf_service.render_pdf(payload, document)
         except HtmlValidationError:
             raise
         except Exception as error:
@@ -96,14 +96,14 @@ def create_app(database_url=None):
             raise HTTPException(500, "PDF rendering failed. Check the backend PDF dependencies.") from error
         return Response(data, media_type="application/pdf", headers=pdf_service.pdf_headers(payload.name))
 
-    @app.post("/templates/{template_id}/pdf")
-    def saved_pdf(template_id: int, session=Depends(session_dependency)):
-        data = template_service.serialize(get_template(session, template_id))
-        return pdf_response(Draft(name=data["name"], html=data["html"], pageSettings=data["pageSettings"]))
-
     @app.post("/pdf/render")
-    def draft_pdf(payload: Draft):
-        return pdf_response(payload)
+    def saved_pdf(payload: PdfRequest, session=Depends(session_dependency)):
+        data = template_service.serialize(get_template(session, payload.templateId))
+        try:
+            document = document_service.get_document(payload.documentId)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        return pdf_response(Draft(name=data["name"], html=data["html"], pageSettings=data["pageSettings"]), document)
 
     return app
 

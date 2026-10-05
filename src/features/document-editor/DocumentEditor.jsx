@@ -1,14 +1,11 @@
-import { useMemo } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Workspace } from "./components/Workspace";
-import { PrintStyles } from "./components/PrintStyles";
 import { SourceCodeDialog } from "./components/SourceCodeDialog";
 import { TablePropertiesDialog } from "./components/TablePropertiesDialog";
 import { ImagePreferencesDialog } from "./components/ImagePreferencesDialog";
 import { VariablesPanel } from "./components/VariablesPanel";
 import { usePagedEditor } from "./hooks/usePagedEditor";
 import { DEFAULT_PAGE_SETTINGS } from "./lib/pageGeometry";
-import { renderVariables } from "./lib/renderVariables";
 
 const NO_VARIABLE_VALUES = Object.freeze({});
 
@@ -21,7 +18,6 @@ export function DocumentEditor({
   renderHeader,
   showVariables = false,
   variableValues = NO_VARIABLE_VALUES,
-  variableRows,
   message,
 }) {
   const editor = usePagedEditor({
@@ -30,10 +26,6 @@ export function DocumentEditor({
     pageSettings,
     onChange,
   });
-  const printHtml = useMemo(
-    () => renderVariables(editor.canonicalHtml, variableValues, variableRows),
-    [editor.canonicalHtml, variableValues, variableRows],
-  );
   const ua = navigator.userAgent;
   const browserWarning = /Firefox\//.test(ua)
     ? "Firefox editing is best effort. Use Chrome or Edge for supported page layout."
@@ -42,7 +34,6 @@ export function DocumentEditor({
       : "";
   return (
     <TooltipProvider>
-      <PrintStyles pageSettings={pageSettings} />
       <div className="document-editor flex h-screen flex-col bg-background text-foreground">
         {renderHeader?.({ isReady: editor.isReady, error: editor.error })}
         {browserWarning ? (
@@ -111,10 +102,6 @@ export function DocumentEditor({
           />
         ) : null}
       </div>
-      <div
-        className="print-document browser-print-document"
-        dangerouslySetInnerHTML={{ __html: printHtml }}
-      />
     </TooltipProvider>
   );
 }

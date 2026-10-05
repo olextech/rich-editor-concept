@@ -5,7 +5,6 @@ export const DEMO_VARIABLE_VALUES = Object.freeze({
   ...sampleValues,
   ...tableVariables.footerValues,
 });
-export const DEMO_TABLE_ROWS = tableVariables.rows;
 
 export const VARIABLE_GROUPS = [
   {

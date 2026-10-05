@@ -1,10 +1,11 @@
 import { DocumentEditor } from "./DocumentEditor";
 import { TopBar } from "./components/TopBar";
 import { useTemplates } from "./hooks/useTemplates";
-import { DEMO_VARIABLE_VALUES, DEMO_TABLE_ROWS } from "./lib/variables";
+import { DEMO_VARIABLE_VALUES } from "./lib/variables";
+import { SaveBeforeOutputDialog } from "./components/SaveBeforeOutputDialog";
 
-export function TemplateEditorApp() {
-  const templates = useTemplates();
+export function TemplateEditorApp({ documentId = "demo-invoice" }) {
+  const templates = useTemplates({ documentId });
   const message = templates.error ? (
     <div
       role="alert"
@@ -18,41 +19,49 @@ export function TemplateEditorApp() {
     </div>
   ) : null;
   return (
-    <DocumentEditor
-      documentKey={`${templates.activeTemplate.id}:${templates.activeTemplate.revision ?? 0}`}
-      initialHtml={templates.html}
-      pageSettings={templates.pageSettings}
-      onChange={templates.setHtml}
-      showVariables
-      variableValues={DEMO_VARIABLE_VALUES}
-      variableRows={DEMO_TABLE_ROWS}
-      message={message}
-      renderHeader={({ isReady, error }) => (
-        <TopBar
-          templates={templates.templates}
-          activeTemplateId={templates.activeTemplateId}
-          onTemplateChange={templates.setActiveTemplateId}
-          name={templates.activeTemplate.label}
-          onNameChange={templates.setName}
-          pageSettings={templates.pageSettings}
-          onPageSettingsChange={templates.setPageSettings}
-          onCreate={templates.createTemplate}
-          onDelete={() => {
-            if (
-              window.confirm(
-                `Delete “${templates.activeTemplate.label}” and its draft?`,
+    <>
+      <DocumentEditor
+        documentKey={`${templates.activeTemplate.id}:${templates.activeTemplate.revision ?? 0}`}
+        initialHtml={templates.html}
+        pageSettings={templates.pageSettings}
+        onChange={templates.setHtml}
+        showVariables
+        variableValues={DEMO_VARIABLE_VALUES}
+        message={message}
+        renderHeader={({ isReady, error }) => (
+          <TopBar
+            templates={templates.templates}
+            activeTemplateId={templates.activeTemplateId}
+            onTemplateChange={templates.setActiveTemplateId}
+            name={templates.activeTemplate.label}
+            onNameChange={templates.setName}
+            pageSettings={templates.pageSettings}
+            onPageSettingsChange={templates.setPageSettings}
+            onCreate={templates.createTemplate}
+            onDelete={() => {
+              if (
+                window.confirm(
+                  `Delete “${templates.activeTemplate.label}” and its draft?`,
+                )
               )
-            )
-              templates.deleteTemplate();
-          }}
-          onSave={templates.save}
-          onExport={templates.exportPdf}
-          onPrint={() => window.print()}
-          disabled={!isReady || templates.busy || Boolean(error)}
-          busy={templates.busy}
-          isDirty={templates.isDirty}
+                templates.deleteTemplate();
+            }}
+            onSave={templates.save}
+            onExport={templates.exportPdf}
+            onPrint={templates.print}
+            disabled={!isReady || templates.busy || Boolean(error)}
+            busy={templates.busy}
+            isDirty={templates.isDirty}
+          />
+        )}
+      />
+      {templates.outputConfirmation ? (
+        <SaveBeforeOutputDialog
+          action={templates.outputConfirmation.action}
+          onCancel={templates.cancelOutput}
+          onConfirm={templates.confirmOutput}
         />
-      )}
-    />
+      ) : null}
+    </>
   );
 }

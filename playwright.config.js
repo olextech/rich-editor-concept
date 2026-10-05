@@ -7,6 +7,8 @@ export default defineConfig({
   timeout: 30000,
   use: {
     baseURL: "http://127.0.0.1:5174",
+    // The headless shell has no PDF viewer. Full Chromium exercises PDF frames.
+    channel: "chromium",
     headless: true,
     screenshot: "only-on-failure",
     trace: "retain-on-failure",

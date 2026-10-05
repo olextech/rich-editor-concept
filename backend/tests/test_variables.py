@@ -5,28 +5,25 @@ import pytest
 from pypdf import PdfReader
 
 from app.services.variable_service import DEMO_VARIABLE_VALUES, DEMO_TABLE_ROWS, render_variables
-from test_api import body, client
+from test_api import body, client, render_saved_pdf
 
 
-def test_company_client_invoice_and_footer_values_render_in_draft_and_saved_pdf(client):
+def test_company_client_invoice_and_footer_values_render_in_saved_pdf(client):
     html = "<h1>Variable fixture</h1>" + "".join(
         f"<p>{token}</p>" for token in DEMO_VARIABLE_VALUES
     ) + '<div data-page-break="true"></div><p>{Company Name} / {Client Name}</p>'
     created = client.post("/templates", json=body(html))
     assert created.status_code == 201
     record = created.json()
-    for response in [
-        client.post("/pdf/render", json=body(html)),
-        client.post(f"/templates/{record['id']}/pdf"),
-    ]:
-        assert response.status_code == 200
-        pdf = PdfReader(io.BytesIO(response.content))
-        assert len(pdf.pages) == 2
-        text = " ".join(" ".join(page.extract_text().split()) for page in pdf.pages)
-        for token, value in DEMO_VARIABLE_VALUES.items():
-            assert value in text
-            assert token not in text
-        assert "Northwind Studio / Aurora Logistics LLC" in pdf.pages[1].extract_text()
+    response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'demo-invoice'})
+    assert response.status_code == 200
+    pdf = PdfReader(io.BytesIO(response.content))
+    assert len(pdf.pages) == 2
+    text = " ".join(" ".join(page.extract_text().split()) for page in pdf.pages)
+    for token, value in DEMO_VARIABLE_VALUES.items():
+        assert value in text
+        assert token not in text
+    assert "Northwind Studio / Aurora Logistics LLC" in pdf.pages[1].extract_text()
     assert client.get(f"/templates/{record['id']}").json()["html"] == record["html"]
     for token in DEMO_VARIABLE_VALUES:
         assert token in record["html"]
@@ -63,7 +60,7 @@ def test_variables_do_not_cross_blocks_cells_or_line_breaks():
 TABLE_HTML = '<figure class="table"><table class="ck-table-resized"><colgroup><col style="width:55%;"><col style="width:10%;"><col style="width:17.5%;"><col style="width:17.5%;"></colgroup><thead><tr><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody><tr><td><strong>{Item <em>Description}</em></strong></td><td style="text-align:right;">{Item Qty}</td><td style="text-align:right;">{Item Rate}</td><td style="text-align:right;">{Item Amount}</td></tr></tbody><tfoot><tr><td colspan="3">Subtotal</td><td>{Subtotal}</td></tr><tr><td colspan="3">VAT ({Tax Rate})</td><td>{Tax Amount}</td></tr><tr><td colspan="3">Total due</td><td><strong>{Total}</strong></td></tr></tfoot></table></figure>'
 
 
-def test_item_rows_and_footer_render_in_draft_and_saved_pdf(client):
+def test_item_rows_and_footer_render_in_saved_pdf(client):
     created = client.post("/templates", json=body(TABLE_HTML))
     assert created.status_code == 201
     record = created.json()
@@ -76,23 +73,20 @@ def test_item_rows_and_footer_render_in_draft_and_saved_pdf(client):
     assert fragment.find(".//tbody/tr/td/strong").text == "Brand identity refresh"
     assert fragment.find(".//tbody/tr/td[@style]").get("style") == "text-align:right;"
     assert fragment.find(".//col").get("style") == "width:55%;"
-    for response in [
-        client.post("/pdf/render", json=body(TABLE_HTML)),
-        client.post(f"/templates/{record['id']}/pdf"),
-    ]:
-        assert response.status_code == 200
-        text = " ".join(PdfReader(io.BytesIO(response.content)).pages[0].extract_text().split())
-        for item in DEMO_TABLE_ROWS:
-            assert text.count(item["{Item Description}"]) == 1
-            for value in item.values():
-                assert value in text
-        assert text.count("Subtotal") == 1
-        assert "VAT (20%)" in text
-        assert DEMO_VARIABLE_VALUES["{Subtotal}"] in text
-        assert DEMO_VARIABLE_VALUES["{Tax Amount}"] in text
-        assert DEMO_VARIABLE_VALUES["{Total}"] in text
-        assert "{Item" not in text
-        assert "{Total}" not in text
+    response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'demo-invoice'})
+    assert response.status_code == 200
+    text = " ".join(PdfReader(io.BytesIO(response.content)).pages[0].extract_text().split())
+    for item in DEMO_TABLE_ROWS:
+        assert text.count(item["{Item Description}"]) == 1
+        for value in item.values():
+            assert value in text
+    assert text.count("Subtotal") == 1
+    assert "VAT (20%)" in text
+    assert DEMO_VARIABLE_VALUES["{Subtotal}"] in text
+    assert DEMO_VARIABLE_VALUES["{Tax Amount}"] in text
+    assert DEMO_VARIABLE_VALUES["{Total}"] in text
+    assert "{Item" not in text
+    assert "{Total}" not in text
     assert client.get(f"/templates/{record['id']}").json()["html"] == record["html"]
     assert len(html5lib.parseFragment(record["html"], namespaceHTMLElements=False).findall(".//tbody/tr")) == 1
 
@@ -145,7 +139,7 @@ def test_many_items_use_remaining_page_space_and_keep_rows_and_footer(client, co
     items = [{**DEMO_TABLE_ROWS[i % len(DEMO_TABLE_ROWS)], "{Item Description}": f"Line{i:03d}", "{Item Amount}": f"End{i:03d}"} for i in range(count)]
     intro = "<h1>Invoice introduction</h1><p>" + "<br>".join(["Company details"] * 10) + "</p><p>" + "<br>".join(["Client details"] * 6) + "</p>"
     html = render_variables(intro + TABLE_HTML.replace("</strong></td>", "</strong><br>Continued description</td>", 1), rows=items)
-    response = client.post("/pdf/render", json=body(html))
+    response = render_saved_pdf(client, body(html))
     assert response.status_code == 200
     pdf = PdfReader(io.BytesIO(response.content))
     assert len(pdf.pages) > 1

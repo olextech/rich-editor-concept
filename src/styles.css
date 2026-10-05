@@ -501,32 +501,3 @@ tr.automatic-page-gap {
   border: 0 !important;
   background: transparent !important;
 }
-.browser-print-document {
-  display: none;
-}
-
-/* ------------------------------------------------------------------ */
-/* Print                                                               */
-/* ------------------------------------------------------------------ */
-
-@media print {
-  html,
-  body,
-  #root {
-    height: auto !important;
-    min-height: 0 !important;
-    background: white;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-
-  .document-editor {
-    display: none !important;
-  }
-
-  .browser-print-document {
-    display: block !important;
-    color: black;
-    background: white;
-  }
-}

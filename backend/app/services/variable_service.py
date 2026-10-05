@@ -1,18 +1,10 @@
 """Render template variables without changing the stored template or markup."""
-import json
 import re
 from copy import deepcopy
-from pathlib import Path
 
 import html5lib
 
-SHARED = Path(__file__).resolve().parents[3] / "shared"
-TABLE_VARIABLES = json.loads((SHARED / "table-variables.json").read_text())
-DEMO_VARIABLE_VALUES = {
-    **json.loads((SHARED / "variable-values.json").read_text()),
-    **TABLE_VARIABLES["footerValues"],
-}
-DEMO_TABLE_ROWS = TABLE_VARIABLES["rows"]
+from .document_service import TABLE_VARIABLES, DEMO_VARIABLE_VALUES, DEMO_TABLE_ROWS
 INLINE_TAGS = {"span", "strong", "b", "em", "i", "u", "s", "sub", "sup", "a"}
 TOKEN = re.compile(r"\{[^{}\r\n]+\}")
 

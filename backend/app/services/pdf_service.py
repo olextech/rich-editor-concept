@@ -17,9 +17,9 @@ def restricted_fetcher(url, *args, **kwargs):
     return default_url_fetcher(url, *args, **kwargs)
 
 
-def render_pdf(payload):
+def render_pdf(payload, document):
     started = time.monotonic()
-    html = render_variables(validate_html(payload.html))
+    html = render_variables(validate_html(payload.html), document["values"], document["rows"])
     from weasyprint import HTML
     settings, margins = payload.pageSettings, payload.pageSettings.margins
     height = (297 if settings.pageSize == "A4" else 210) if settings.orientation == "portrait" else (210 if settings.pageSize == "A4" else 148)

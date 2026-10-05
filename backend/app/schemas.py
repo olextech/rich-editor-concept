@@ -38,3 +38,8 @@ class Draft(StrictModel):
 
 class TemplatePayload(Draft):
     name: str = Field(min_length=1, max_length=200)
+
+
+class PdfRequest(StrictModel):
+    templateId: StrictInt = Field(gt=0)
+    documentId: str = Field(min_length=1, max_length=200, pattern=r"^\S+$")

@@ -13,6 +13,14 @@ SETTINGS = {"pageSize": "A4", "orientation": "portrait", "margins": {"top": 20, 
 def body(html="<p>Hello</p>", **extra):
     return {"name": "Example", "html": html, "pageSettings": SETTINGS, **extra}
 
+
+def render_saved_pdf(client, payload):
+    created = client.post('/templates', json=payload)
+    assert created.status_code == 201
+    return client.post('/pdf/render', json={
+        'templateId': created.json()['id'], 'documentId': 'demo-invoice',
+    })
+
 @pytest.fixture
 def client(tmp_path):
     with TestClient(create_app(f"sqlite:///{tmp_path / 'templates.db'}")) as client:
@@ -51,7 +59,6 @@ def test_crud_and_idempotent_update(client):
 ])
 def test_rejects_unsafe_or_unsupported_html(client, html):
     assert client.post('/templates', json=body(html)).status_code == 422
-    assert client.post('/pdf/render', json=body(html)).status_code == 422
     assert client.get('/templates').json() == []
 
 
@@ -67,13 +74,13 @@ def test_page_settings_and_names(client):
     assert client.post('/templates', json=body(name='   ')).status_code == 400
     assert client.post('/templates', json={**body(), 'unexpected': 1}).status_code == 400
     assert client.get('/templates/999').status_code == 404
-    assert client.post('/templates/999/pdf').status_code == 404
+    assert client.post('/pdf/render', json={'templateId': 999, 'documentId': 'demo-invoice'}).status_code == 404
 
 
 def test_manual_break_pdf_and_geometry(client):
     html = '<h1>First page</h1><div data-page-break="true"></div><h1>Second page</h1>'
     settings = {**SETTINGS, 'pageSize': 'A5', 'orientation': 'landscape'}
-    response = client.post('/pdf/render', json=body(html, pageSettings=settings))
+    response = render_saved_pdf(client, body(html, pageSettings=settings))
     assert response.status_code == 200
     assert response.headers['content-type'] == 'application/pdf'
     pdf = PdfReader(io.BytesIO(response.content))
@@ -82,10 +89,6 @@ def test_manual_break_pdf_and_geometry(client):
     assert 'Second page' in pdf.pages[1].extract_text()
     assert float(pdf.pages[0].mediabox.width) == pytest.approx(210 * 72 / 25.4, abs=0.1)
     assert float(pdf.pages[0].mediabox.height) == pytest.approx(148 * 72 / 25.4, abs=0.1)
-    assert client.get('/templates').json() == []
-    id = client.post('/templates', json=body(html, pageSettings=settings)).json()['id']
-    saved_pdf = client.post(f'/templates/{id}/pdf')
-    assert len(PdfReader(io.BytesIO(saved_pdf.content)).pages) == 2
 
 
 def test_images_and_legacy_breaks(client):
@@ -97,7 +100,7 @@ def test_images_and_legacy_breaks(client):
     assert response.status_code == 201
     assert '<div data-page-break="true"></div>' in response.json()['html']
     assert '<img' in response.json()['html']
-    assert client.post('/pdf/render', json=body(html)).status_code == 200
+    assert render_saved_pdf(client, body(html)).status_code == 200
 
 
 def test_resized_tables_save_and_render_with_column_widths(client):
@@ -109,15 +112,12 @@ def test_resized_tables_save_and_render_with_column_widths(client):
     assert 'width:30%' in record['html']
     assert 'width:70%' in record['html']
     assert client.get(f"/templates/{record['id']}").json()['html'] == record['html']
-    for response in [
-        client.post('/pdf/render', json=body(html)),
-        client.post(f"/templates/{record['id']}/pdf"),
-    ]:
-        assert response.status_code == 200
-        pdf = PdfReader(io.BytesIO(response.content))
-        assert len(pdf.pages) == 1
-        assert 'Narrow column' in pdf.pages[0].extract_text()
-        assert 'Wide column' in pdf.pages[0].extract_text()
+    response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'demo-invoice'})
+    assert response.status_code == 200
+    pdf = PdfReader(io.BytesIO(response.content))
+    assert len(pdf.pages) == 1
+    assert 'Narrow column' in pdf.pages[0].extract_text()
+    assert 'Wide column' in pdf.pages[0].extract_text()
 
 
 def test_resized_images_save_and_render_with_aspect_ratio(client):
@@ -130,14 +130,11 @@ def test_resized_images_save_and_render_with_aspect_ratio(client):
     record = created.json()
     assert 'aspect-ratio:80/40' in record['html']
     assert client.get(f"/templates/{record['id']}").json()['html'] == record['html']
-    for response in [
-        client.post('/pdf/render', json=body(html)),
-        client.post(f"/templates/{record['id']}/pdf"),
-    ]:
-        assert response.status_code == 200
-        pdf = PdfReader(io.BytesIO(response.content))
-        assert len(pdf.pages) == 1
-        assert len(pdf.pages[0].images) == 1
+    response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'demo-invoice'})
+    assert response.status_code == 200
+    pdf = PdfReader(io.BytesIO(response.content))
+    assert len(pdf.pages) == 1
+    assert len(pdf.pages[0].images) == 1
 
 
 @pytest.mark.parametrize('ratio', ['80/40', '16 / 9', '1.5', '.5 / 2.5', 'auto', 'auto 80 / 40'])
@@ -169,3 +166,42 @@ def test_database_survives_app_restart(tmp_path):
         id = client.post('/templates', json=body()).json()['id']
     with TestClient(create_app(url)) as client:
         assert client.get(f'/templates/{id}').json()['html'] == '<p>Hello</p>'
+
+
+def test_pdf_generation_accepts_only_saved_template_and_document_ids(client):
+    template_id = client.post('/templates', json=body('<p>Saved content</p>')).json()['id']
+    ids = {'templateId': template_id, 'documentId': 'demo-invoice'}
+    for payload in [body(), {**ids, 'html': '<p>Injected draft</p>'},
+                    {**ids, 'pageSettings': SETTINGS}, {**ids, 'values': {}},
+                    {**ids, 'templateId': 0}, {**ids, 'templateId': True},
+                    {**ids, 'documentId': ''}, {**ids, 'documentId': ' '},
+                    {'templateId': template_id}]:
+        assert client.post('/pdf/render', json=payload).status_code == 400
+    assert client.post('/pdf/render', json={**ids, 'documentId': 'missing'}).status_code == 404
+    response = client.post('/pdf/render', json=ids)
+    assert response.status_code == 200
+    assert 'attachment' in response.headers['content-disposition']
+    assert 'Saved content' in PdfReader(io.BytesIO(response.content)).pages[0].extract_text()
+
+
+def test_pdf_loads_document_data_by_id_and_keeps_template_unchanged(client, monkeypatch):
+    from app.services import document_service
+
+    html = '<p>{Client Name}</p><table><tbody><tr><td>{Item Description}</td></tr></tbody></table>'
+    record = client.post('/templates', json=body(html)).json()
+    loaded = []
+
+    def lookup(document_id):
+        loaded.append(document_id)
+        return {'values': {'{Client Name}': 'Selected customer'},
+                'rows': [{'{Item Description}': 'Selected item'}]}
+
+    monkeypatch.setattr(document_service, 'get_document', lookup)
+    response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'order-42'})
+    assert response.status_code == 200
+    assert loaded == ['order-42']
+    text = PdfReader(io.BytesIO(response.content)).pages[0].extract_text()
+    assert 'Selected customer' in text
+    assert 'Selected item' in text
+    assert 'Aurora' not in text
+    assert client.get(f"/templates/{record['id']}").json()['html'] == record['html']
