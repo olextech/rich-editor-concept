@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Embedded document editors</title>
+    <style>
+      body {
+        font-family: Georgia, serif;
+        background: #eef3f7;
+        color: #243444;
+        margin: 24px;
+      }
+      #host-sentinel {
+        font-size: 19px;
+      }
+      #host-button {
+        border: 3px solid #456;
+        padding: 7px 13px;
+      }
+      .example-controls {
+        display: flex;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      .example-controls button {
+        padding: 6px 10px;
+      }
+      .example-editor {
+        border: 1px solid #9aa;
+        margin-bottom: 24px;
+      }
+      pre {
+        white-space: pre-wrap;
+        max-width: 900px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Editor integration example</h1>
+    <div id="host-sentinel" class="ck-content">
+      <h2>Host content</h2>
+      <p>This content belongs to the host application.</p>
+    </div>
+    <button id="host-button" type="button">Host button</button>
+    <div id="root"></div>
+    <script type="module" src="./embedded-editor.jsx"></script>
+  </body>
+</html>

@@ -1,5 +1,9 @@
 import base64
 import io
+import os
+from pathlib import Path
+import subprocess
+import sys
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -184,11 +188,8 @@ def test_pdf_generation_accepts_only_saved_template_and_document_ids(client):
     assert 'Saved content' in PdfReader(io.BytesIO(response.content)).pages[0].extract_text()
 
 
-def test_pdf_loads_document_data_by_id_and_keeps_template_unchanged(client, monkeypatch):
-    from app.services import document_service
-
+def test_pdf_loads_document_data_by_id_and_keeps_template_unchanged(tmp_path):
     html = '<p>{Client Name}</p><table><tbody><tr><td>{Item Description}</td></tr></tbody></table>'
-    record = client.post('/templates', json=body(html)).json()
     loaded = []
 
     def lookup(document_id):
@@ -196,12 +197,118 @@ def test_pdf_loads_document_data_by_id_and_keeps_template_unchanged(client, monk
         return {'values': {'{Client Name}': 'Selected customer'},
                 'rows': [{'{Item Description}': 'Selected item'}]}
 
-    monkeypatch.setattr(document_service, 'get_document', lookup)
-    response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'order-42'})
-    assert response.status_code == 200
-    assert loaded == ['order-42']
-    text = PdfReader(io.BytesIO(response.content)).pages[0].extract_text()
-    assert 'Selected customer' in text
-    assert 'Selected item' in text
-    assert 'Aurora' not in text
-    assert client.get(f"/templates/{record['id']}").json()['html'] == record['html']
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'custom.db'}", document_lookup=lookup)) as client:
+        record = client.post('/templates', json=body(html)).json()
+        response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'order-42'})
+        assert response.status_code == 200
+        assert loaded == ['order-42']
+        text = PdfReader(io.BytesIO(response.content)).pages[0].extract_text()
+        assert 'Selected customer' in text
+        assert 'Selected item' in text
+        assert 'Aurora' not in text
+        assert client.get(f"/templates/{record['id']}").json()['html'] == record['html']
+
+
+def test_injected_lookup_can_reject_document(tmp_path):
+    def lookup(document_id):
+        raise LookupError("Document not found.")
+
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'custom.db'}", document_lookup=lookup)) as client:
+        record = client.post('/templates', json=body()).json()
+        response = client.post('/pdf/render', json={'templateId': record['id'], 'documentId': 'missing'})
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'Document not found.'
+
+
+def test_database_is_initialized_only_at_startup(tmp_path):
+    database = tmp_path / 'deferred.db'
+    app = create_app(f"sqlite:///{database}")
+    assert not database.exists()
+    with TestClient(app) as client:
+        assert database.exists()
+        assert client.get('/templates').json() == []
+        assert client.post('/templates', json=body()).status_code == 201
+
+
+def test_import_does_not_create_database(tmp_path):
+    database = tmp_path / 'import.db'
+    backend = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [sys.executable, '-c', 'import app.main'],
+        cwd=backend,
+        env={**os.environ, 'DATABASE_URL': f"sqlite:///{database}", 'PYTHONPATH': str(backend)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert not database.exists()
+
+
+def preflight(client, origin):
+    return client.options('/pdf/render', headers={
+        'Origin': origin,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'Content-Type',
+    })
+
+
+def test_configurable_cors_replaces_local_defaults(tmp_path):
+    origin = 'https://editor.example.com'
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'cors.db'}", cors_origins=[origin])) as client:
+        allowed = preflight(client, origin)
+        assert allowed.status_code == 200
+        assert allowed.headers['access-control-allow-origin'] == origin
+        denied = preflight(client, 'http://localhost:5173')
+        assert denied.status_code == 400
+        assert 'access-control-allow-origin' not in denied.headers
+
+
+def test_empty_cors_origins_disables_cross_origin_access(tmp_path):
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'cors.db'}", cors_origins=[])) as client:
+        response = preflight(client, 'http://localhost:5173')
+        assert response.status_code == 400
+        assert 'access-control-allow-origin' not in response.headers
+
+
+def test_cors_environment_and_explicit_override(tmp_path, monkeypatch):
+    monkeypatch.setenv('CORS_ORIGINS', ' https://one.example.com, https://two.example.com, ')
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'env.db'}")) as client:
+        for origin in ['https://one.example.com', 'https://two.example.com']:
+            assert preflight(client, origin).headers['access-control-allow-origin'] == origin
+        assert preflight(client, 'http://localhost:5173').status_code == 400
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'override.db'}", cors_origins=[])) as client:
+        assert preflight(client, 'https://one.example.com').status_code == 400
+
+
+def test_default_cors_origins(tmp_path, monkeypatch):
+    monkeypatch.delenv('CORS_ORIGINS', raising=False)
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'defaults.db'}")) as client:
+        for origin in ['http://localhost:5173', 'http://127.0.0.1:5173']:
+            assert preflight(client, origin).headers['access-control-allow-origin'] == origin
+
+
+def test_cors_allows_authorization_header(tmp_path):
+    origin = 'https://editor.example.com'
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'auth-cors.db'}", cors_origins=[origin])) as client:
+        response = client.options('/pdf/render', headers={
+            'Origin': origin,
+            'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'Authorization, Content-Type',
+        })
+        assert response.status_code == 200
+        assert response.headers['access-control-allow-origin'] == origin
+        assert 'authorization' in response.headers['access-control-allow-headers'].lower()
+
+
+@pytest.mark.parametrize('credentials', [False, True])
+def test_cors_credentials_require_explicit_configuration(tmp_path, credentials):
+    origin = 'https://editor.example.com'
+    options = {'cors_allow_credentials': True} if credentials else {}
+    with TestClient(create_app(f"sqlite:///{tmp_path / 'credentials.db'}", cors_origins=[origin], **options)) as client:
+        for response in [preflight(client, origin), client.get('/health', headers={'Origin': origin})]:
+            assert response.status_code == 200
+            assert response.headers['access-control-allow-origin'] == origin
+            if credentials:
+                assert response.headers['access-control-allow-credentials'] == 'true'
+            else:
+                assert 'access-control-allow-credentials' not in response.headers

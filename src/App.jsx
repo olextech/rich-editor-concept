@@ -1,4 +1,4 @@
-import { TemplateEditorApp } from "./features/document-editor/TemplateEditorApp";
+import { TemplateEditorApp } from "./demo/TemplateEditorApp";
 
 export default function App() {
   return <TemplateEditorApp />;

@@ -1,5 +1,7 @@
 # Detailed Plan — Iteration 2: Paged Editing Experience
 
+> Historical planning document. The implemented component and IDs-only backend PDF flow are defined in [design.md](design.md) and [the embedding guide](../../docs/embedding.md). Earlier draft PDF requirements and component names are superseded.
+
 ## References
 
 - Task: ./prd.md

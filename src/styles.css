@@ -81,14 +81,8 @@
   border-color: var(--color-border);
 }
 
-html,
-body,
-#root {
-  margin: 0;
-  min-height: 100%;
-}
-
-body {
+.papercraft-editor,
+.papercraft-editor-portal {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
@@ -500,4 +494,20 @@ tr.automatic-page-gap {
   padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
+}
+
+.document-editor {
+  container-type: inline-size;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.variables-panel {
+  display: none;
+}
+@container (min-width: 1000px) {
+  .variables-panel {
+    display: block;
+  }
 }

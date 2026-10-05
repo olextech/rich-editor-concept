@@ -1,5 +1,5 @@
-import sampleValues from "../../../../shared/variable-values.json";
-import tableVariables from "../../../../shared/table-variables.json";
+import sampleValues from "../../shared/variable-values.json";
+import tableVariables from "../../shared/table-variables.json";
 
 export const DEMO_VARIABLE_VALUES = Object.freeze({
   ...sampleValues,

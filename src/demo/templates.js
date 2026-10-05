@@ -1,6 +1,6 @@
-import { DEFAULT_PAGE_SETTINGS } from "./pageGeometry";
+import { DEFAULT_PAGE_SETTINGS } from "../features/document-editor/lib/pageGeometry";
 
-/** @type {import("./types.js").TemplateDefinition[]} */
+/** @type {import("../features/document-editor/lib/types.js").TemplateDefinition[]} */
 export const TEMPLATES = [
   {
     id: "invoice",

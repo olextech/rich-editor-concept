@@ -42,25 +42,33 @@ Open http://localhost:5173. Vite proxies `/api` to the backend. `DATABASE_URL` o
 
 ## Reuse the editor
 
-```jsx
-import { DocumentEditor } from "./src/features/document-editor/DocumentEditor";
+Build a local package with `npm run build:library`, then run `npm pack`. Install the tarball in the host project. The package exports a typed React component and precompiled, scoped CSS. The host does not need Tailwind.
 
-<DocumentEditor
-  documentKey={template.id}
-  initialHtml={template.html}
-  pageSettings={template.pageSettings}
-  onChange={setHtml}
-  renderHeader={({ isReady, error }) => (
-    <button disabled={!isReady || Boolean(error)} onClick={save}>
-      Save
-    </button>
-  )}
-/>;
+```jsx
+import { DocumentEditor } from "rich-editor-concept";
+import "rich-editor-concept/styles.css";
+
+<div style={{ height: 680 }}>
+  <DocumentEditor
+    licenseKey={licenseKey}
+    documentKey={template.id}
+    initialHtml={template.html}
+    pageSettings={template.pageSettings}
+    onChange={setHtml}
+    onStateChange={setEditorState}
+    variableGroups={variableGroups}
+    readOnly={!canEdit}
+  />
+</div>;
 ```
 
-`initialHtml` initializes an edit session; change `documentKey` to load another document or an external revision. The host owns page settings, saving, template selection, output actions, and status messages. `showVariables` defaults to false. The optional `variableValues` object supplies sample tooltips in the variables panel; it does not generate document content. Template variables remain unchanged in the editor.
+`initialHtml` starts an edit session. Change `documentKey` to load another document or an external revision. The host owns template selection, storage, saving, authentication, and output controls. Variable groups are host data; an empty list hides the panel. Tooltip values do not generate document content.
 
-`TemplateEditorApp` accepts a `documentId` prop, which defaults to `"demo-invoice"`. The backend document service currently exposes this one sample record with thirteen items. The document ID is independent of the template ID. Replace `backend/app/services/document_service.py` with a business-record lookup when integrating the editor. The backend fills variables and repeats body rows, including connected rows with merged cells. Headers and footer rows remain. No document values or rows are accepted in the PDF request.
+The optional `rich-editor-concept/client` entry provides `createTemplateClient`, `downloadPdf`, and `printPdf`. It supports a host API URL, authentication headers, credentials, custom fetch, and request cancellation. It sends only saved template and document IDs for PDF generation.
+
+See [the embedding guide](docs/embedding.md), [the code review](docs/architecture-review.md), and [backend integration](docs/backend-integration.md). Open `/examples/embedded-editor.html` on the dev server to test two independent editors in a host page.
+
+The demo application is in `src/demo`. It passes a `documentId` that defaults to `"demo-invoice"`. Connect real business data with `create_app(document_lookup=load_document, cors_origins=[...])`; keep access checks in the host application. PDF requests do not accept document values or rows.
 
 ## Validation and rendering
 
@@ -96,9 +104,11 @@ Create/update payloads contain `name`, `html`, and `pageSettings` with `pageSize
 npx playwright install chromium
 npm test
 npm run test:backend
+npm run test:client
 npm run build
+npm run test:package
 ```
 
 The browser suite starts isolated servers on ports 5174 and 8001 and uses `backend/test-templates.db`. It covers document switching, reload recovery, source validation, manual breaks, cross-page keyboard navigation and selection, paragraph joins, blank pages, undo, geometry, automatic reflow, overflow, CRUD, PDF downloads, save confirmations, cancellation and failure recovery, and printing the returned PDF through a native viewer frame. Headless tests use full Chromium because the headless shell has no native PDF viewer. They replace the final print call to avoid a system dialog and verify that the frame contains the backend PDF. Backend PDF geometry is also compared with editor geometry. Backend tests use temporary databases and exercise validation, persistence, resource isolation, and PDF dimensions.
 
-For deployment, set `VITE_API_URL` at build time or route `/api` to the backend. `npm run build` writes to `dist/`; `npm run preview` previews the frontend build. CKEditor is configured with `licenseKey: "GPL"`; the embedding application's licensing must be compatible with that choice.
+For deployment, set `VITE_API_URL` at build time or route `/api` to the backend. `npm run build` writes the editor package to `dist/editor` and the demo to `dist/demo`. `npm run preview` previews the demo. The host supplies its CKEditor license key; the demo supplies `GPL`.

@@ -54,6 +54,7 @@ export class DocumentNavigation {
   }
 
   removeManualBreak(direction) {
+    if (this.editor.isReadOnly) return false;
     const { model } = this.editor;
     const selection = model.document.selection;
     if (!selection.isCollapsed) return false;

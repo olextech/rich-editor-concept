@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
-from .db import Template, create_database, now
+from .db import Base, Template, create_database, now
 from .schemas import Draft, PdfRequest, TemplatePayload
 from .services import document_service, pdf_service, template_service
 from .services.html_validation import HtmlValidationError
@@ -15,17 +15,35 @@ from .services.html_validation import HtmlValidationError
 logger = logging.getLogger(__name__)
 
 
-def create_app(database_url=None):
+DEFAULT_CORS_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+
+def create_app(database_url=None, *, document_lookup=None, cors_origins=None, cors_allow_credentials: bool = False):
+    """Create the API with host-owned document lookup and allowed origins.
+
+    ``document_lookup(document_id)`` returns ``{"values": {...}, "rows": [...]}``
+    or raises ``LookupError`` when the record is unavailable. It is synchronous;
+    FastAPI runs the PDF route in its worker thread pool.
+    """
     database_url = database_url or os.environ.get("DATABASE_URL", f"sqlite:///{Path(__file__).resolve().parents[1] / 'templates.db'}")
-    engine, sessions = create_database(database_url)
+    engine, sessions = create_database(database_url, initialize=False)
+    document_lookup = document_service.get_document if document_lookup is None else document_lookup
+    if cors_origins is None:
+        configured_origins = os.environ.get("CORS_ORIGINS")
+        cors_origins = DEFAULT_CORS_ORIGINS if configured_origins is None else [
+            origin.strip() for origin in configured_origins.split(",") if origin.strip()
+        ]
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        engine.dispose()
+        try:
+            Base.metadata.create_all(engine)
+            yield
+        finally:
+            engine.dispose()
 
     app = FastAPI(title="Paged template editor", lifespan=lifespan)
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"])
+    app.add_middleware(CORSMiddleware, allow_origins=list(cors_origins), allow_credentials=cors_allow_credentials, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type", "Authorization"])
 
     def session_dependency():
         with sessions() as session:
@@ -100,7 +118,7 @@ def create_app(database_url=None):
     def saved_pdf(payload: PdfRequest, session=Depends(session_dependency)):
         data = template_service.serialize(get_template(session, payload.templateId))
         try:
-            document = document_service.get_document(payload.documentId)
+            document = document_lookup(payload.documentId)
         except LookupError as error:
             raise HTTPException(404, str(error)) from error
         return pdf_response(Draft(name=data["name"], html=data["html"], pageSettings=data["pageSettings"]), document)

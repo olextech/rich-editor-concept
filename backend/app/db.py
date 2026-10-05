@@ -21,7 +21,8 @@ class Template(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
-def create_database(url):
+def create_database(url, *, initialize=True):
+    """Create storage handles; applications can defer schema setup to startup."""
     kwargs = {"connect_args": {"check_same_thread": False, "timeout": 10}} if url.startswith("sqlite") else {}
     if url in ("sqlite://", "sqlite:///:memory:"):
         kwargs["poolclass"] = StaticPool
@@ -30,7 +31,8 @@ def create_database(url):
         @event.listens_for(engine, "connect")
         def configure_sqlite(connection, _):
             connection.execute("PRAGMA foreign_keys=ON")
-    Base.metadata.create_all(engine)
+    if initialize:
+        Base.metadata.create_all(engine)
     return engine, sessionmaker(engine, expire_on_commit=False)
 
 

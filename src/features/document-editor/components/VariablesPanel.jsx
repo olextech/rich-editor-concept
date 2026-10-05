@@ -1,17 +1,21 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { VARIABLE_GROUPS } from "../lib/variables";
 
-export function VariablesPanel({ onInsertVariable, variableValues = {} }) {
-  const [openGroupId, setOpenGroupId] = useState(VARIABLE_GROUPS[0].id);
+export function VariablesPanel({
+  variableGroups,
+  onInsertVariable,
+  variableValues = {},
+  disabled = false,
+}) {
+  const [openGroupId, setOpenGroupId] = useState(variableGroups[0]?.id ?? "");
 
   return (
     <aside
-      className="variables-panel hidden lg:block w-72 shrink-0 overflow-y-auto border-l border-border bg-background p-4"
+      className="variables-panel w-72 shrink-0 overflow-y-auto border-l border-border bg-background p-4"
       aria-label="Template variables"
     >
       <div className="rounded-lg border border-[#eeeeef] bg-background">
-        {VARIABLE_GROUPS.map((group, index) => {
+        {variableGroups.map((group, index) => {
           const isOpen = group.id === openGroupId;
 
           return (
@@ -46,6 +50,7 @@ export function VariablesPanel({ onInsertVariable, variableValues = {} }) {
                     {group.variables.map((variable) => (
                       <button
                         key={variable}
+                        disabled={disabled}
                         type="button"
                         className="w-full truncate text-left text-[#1973e1] hover:underline"
                         title={

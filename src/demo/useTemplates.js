@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { TEMPLATES } from "../lib/templates";
+import { TEMPLATES } from "./templates";
 import {
   DEFAULT_PAGE_SETTINGS,
   validatePageSettings,
-} from "../lib/pageGeometry";
-import { validateHtml } from "../lib/htmlSubset";
-import { downloadPdf, templateApi } from "../lib/api";
-import { printPdf } from "../lib/printPdf";
+} from "../features/document-editor/lib/pageGeometry";
+import { validateHtml } from "../features/document-editor/lib/htmlSubset";
+import { downloadPdf, templateApi } from "./api";
+import { printPdf } from "../editor/printPdf";
 
 const STORAGE_KEY = "papercraft-drafts-v1";
 const clone = (value) => structuredClone(value);

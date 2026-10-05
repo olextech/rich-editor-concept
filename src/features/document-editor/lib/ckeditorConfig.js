@@ -155,7 +155,6 @@ class TablePropertyDialogs extends Plugin {
 }
 
 export const editorConfig = {
-  licenseKey: "GPL",
   plugins: [
     Essentials,
     Paragraph,

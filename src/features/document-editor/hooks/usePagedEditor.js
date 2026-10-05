@@ -1,25 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PagedEditorController } from "../lib/PagedEditorController";
-import { getPageMetrics } from "../lib/pageGeometry";
-import { splitManualPages, formatHtmlSource } from "../lib/pageHtml";
+import { DEFAULT_PAGE_SETTINGS, getPageMetrics } from "../lib/pageGeometry";
+import { formatHtmlSource } from "../lib/pageHtml";
 
 export function usePagedEditor({
   documentKey,
   initialHtml,
   pageSettings,
   onChange,
+  licenseKey,
+  readOnly,
+  onStateChange,
 }) {
   const controllerRef = useRef(null);
   const toolbarHostRef = useRef(null);
   const editableHost = useRef(null);
-  const latest = useRef({ initialHtml, onChange, pageSettings });
-  latest.current = { initialHtml, onChange, pageSettings };
+  const latest = useRef(null);
+  latest.current = {
+    initialHtml,
+    onChange,
+    pageSettings,
+    readOnly,
+    onStateChange,
+  };
+  const settingsError = useRef("");
   const [isReady, setIsReady] = useState(false);
   const [isLayoutReady, setIsLayoutReady] = useState(false);
   const [error, setError] = useState("");
   const [canonicalHtml, setCanonicalHtml] = useState(initialHtml);
-  const [pageNames, setPageNames] = useState(() =>
-    splitManualPages(initialHtml).map((_, index) => `page-${index + 1}`),
+  const [pageNames, setPageNames] = useState(["page-1"]);
+  const [validPageSettings, setValidPageSettings] = useState(
+    DEFAULT_PAGE_SETTINGS,
   );
   const [sourceDialog, setSourceDialog] = useState({
     isOpen: false,
@@ -34,13 +45,28 @@ export function usePagedEditor({
     setIsLayoutReady(false);
     setError("");
     setCanonicalHtml(latest.current.initialHtml);
+    setPageNames(["page-1"]);
     setSourceDialog({ isOpen: false, value: "", error: "" });
     setTablePropertiesDialog(null);
     setImagePreferencesDialog(null);
+    let metrics;
+    try {
+      metrics = getPageMetrics(latest.current.pageSettings);
+      setValidPageSettings(latest.current.pageSettings);
+      settingsError.current = "";
+    } catch (error) {
+      settingsError.current = error.message;
+      setError(error.message);
+      metrics = getPageMetrics(DEFAULT_PAGE_SETTINGS);
+      setValidPageSettings(DEFAULT_PAGE_SETTINGS);
+    }
     const controller = new PagedEditorController({
       html: latest.current.initialHtml,
-      metrics: getPageMetrics(latest.current.pageSettings),
+      metrics,
+      licenseKey,
+      readOnly: latest.current.readOnly,
       onChange: (html) => {
+        if (controller.disposed) return;
         setCanonicalHtml(html);
         latest.current.onChange?.(html);
       },
@@ -49,7 +75,7 @@ export function usePagedEditor({
           previous.join() === names.join() ? previous : names,
         ),
       onLayout: setIsLayoutReady,
-      onError: setError,
+      onError: (message) => setError(settingsError.current || message),
       onSource: (html) =>
         setSourceDialog({
           isOpen: true,
@@ -73,11 +99,36 @@ export function usePagedEditor({
       if (controllerRef.current === controller) controllerRef.current = null;
       controller.destroy().catch(console.error);
     };
-  }, [documentKey]);
+  }, [documentKey, licenseKey]);
 
   useEffect(() => {
-    controllerRef.current?.updateMetrics(getPageMetrics(pageSettings));
+    try {
+      const metrics = getPageMetrics(pageSettings);
+      setValidPageSettings(pageSettings);
+      settingsError.current = "";
+      controllerRef.current?.updateMetrics(metrics);
+    } catch (error) {
+      settingsError.current = error.message;
+      setError(error.message);
+    }
   }, [pageSettings]);
+
+  useEffect(() => {
+    controllerRef.current?.setReadOnly(readOnly);
+    if (readOnly) {
+      setTablePropertiesDialog(null);
+      setImagePreferencesDialog(null);
+    }
+  }, [readOnly]);
+
+  const ready = isReady && isLayoutReady;
+  useEffect(() => {
+    latest.current.onStateChange?.({
+      isReady: ready,
+      error,
+      pageCount: pageNames.length,
+    });
+  }, [ready, error, pageNames.length]);
 
   const registerEditableHost = useCallback((node) => {
     editableHost.current = node;
@@ -141,6 +192,7 @@ export function usePagedEditor({
     );
   }, []);
   return {
+    pageSettings: validPageSettings,
     pageNames,
     canonicalHtml,
     toolbarHostRef,
@@ -148,7 +200,7 @@ export function usePagedEditor({
     addPage,
     deletePage,
     insertVariable,
-    isReady: isReady && isLayoutReady,
+    isReady: ready,
     error,
     sourceDialog,
     setSourceValue,

@@ -1,8 +1,8 @@
-import { DocumentEditor } from "./DocumentEditor";
-import { TopBar } from "./components/TopBar";
-import { useTemplates } from "./hooks/useTemplates";
-import { DEMO_VARIABLE_VALUES } from "./lib/variables";
-import { SaveBeforeOutputDialog } from "./components/SaveBeforeOutputDialog";
+import { DocumentEditor } from "../editor/index.js";
+import { TopBar } from "./TopBar";
+import { useTemplates } from "./useTemplates";
+import { DEMO_VARIABLE_VALUES, VARIABLE_GROUPS } from "./variables";
+import { SaveBeforeOutputDialog } from "./SaveBeforeOutputDialog";
 
 export function TemplateEditorApp({ documentId = "demo-invoice" }) {
   const templates = useTemplates({ documentId });
@@ -19,13 +19,14 @@ export function TemplateEditorApp({ documentId = "demo-invoice" }) {
     </div>
   ) : null;
   return (
-    <>
+    <div className="papercraft-demo papercraft-editor">
       <DocumentEditor
         documentKey={`${templates.activeTemplate.id}:${templates.activeTemplate.revision ?? 0}`}
         initialHtml={templates.html}
         pageSettings={templates.pageSettings}
         onChange={templates.setHtml}
-        showVariables
+        licenseKey="GPL"
+        variableGroups={VARIABLE_GROUPS}
         variableValues={DEMO_VARIABLE_VALUES}
         message={message}
         renderHeader={({ isReady, error }) => (
@@ -62,6 +63,6 @@ export function TemplateEditorApp({ documentId = "demo-invoice" }) {
           onConfirm={templates.confirmOutput}
         />
       ) : null}
-    </>
+    </div>
   );
 }

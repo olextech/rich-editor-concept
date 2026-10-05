@@ -3,17 +3,17 @@ export const PAGE_GAP_PX = 32;
 export const PAGE_RULER_OFFSET_PX = 30;
 
 /** @type {Record<import("./types.js").PageSize, { widthMm: number; heightMm: number }>} */
-export const PAGE_PRESETS = {
-  A4: { widthMm: 210, heightMm: 297 },
-  A5: { widthMm: 148, heightMm: 210 },
-};
+export const PAGE_PRESETS = Object.freeze({
+  A4: Object.freeze({ widthMm: 210, heightMm: 297 }),
+  A5: Object.freeze({ widthMm: 148, heightMm: 210 }),
+});
 
 /** @type {import("./types.js").PageSettings} */
-export const DEFAULT_PAGE_SETTINGS = {
+export const DEFAULT_PAGE_SETTINGS = Object.freeze({
   pageSize: "A4",
   orientation: "portrait",
-  margins: { top: 20, right: 20, bottom: 20, left: 20 },
-};
+  margins: Object.freeze({ top: 20, right: 20, bottom: 20, left: 20 }),
+});
 
 export function getPagePreset(pageSize) {
   return PAGE_PRESETS[pageSize] ?? PAGE_PRESETS.A4;

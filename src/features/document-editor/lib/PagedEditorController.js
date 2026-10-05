@@ -5,6 +5,37 @@ import { DocumentNavigation } from "./DocumentNavigation";
 import { readTableProperties, tablePropertyCommand } from "./tableProperties";
 import { readImageProperties, selectedImage } from "./imageProperties";
 
+const PORTAL_THEME_TOKENS = [
+  "background",
+  "foreground",
+  "card",
+  "card-foreground",
+  "popover",
+  "popover-foreground",
+  "primary",
+  "primary-foreground",
+  "secondary",
+  "secondary-foreground",
+  "muted",
+  "muted-foreground",
+  "accent",
+  "accent-foreground",
+  "destructive",
+  "border",
+  "input",
+  "ring",
+  "canvas",
+  "paper",
+  "ruler-bg",
+  "ruler-tick",
+  "ruler-margin",
+  "margin-guide",
+  "radius",
+  "font-sans",
+  "font-mono",
+  "font-serif",
+];
+
 /** One editable model for the entire document; pagination only changes its view. */
 export class PagedEditorController {
   constructor({
@@ -17,6 +48,8 @@ export class PagedEditorController {
     onImagePreferences,
     onError,
     onLayout,
+    licenseKey,
+    readOnly = false,
   }) {
     Object.assign(this, {
       html,
@@ -28,24 +61,34 @@ export class PagedEditorController {
       onImagePreferences,
       onError,
       onLayout,
+      licenseKey,
+      readOnly,
     });
     this.disposed = false;
     this.domEvents = new AbortController();
   }
 
   async mount(toolbar) {
+    if (typeof this.licenseKey !== "string" || !this.licenseKey.trim())
+      throw new Error("Provide a CKEditor license key.");
     validateHtml(this.html);
     const { editorConfig, editorType } = await import("./ckeditorConfig");
     if (this.disposed) return;
-    const editor = await editorType.create(
-      normalizeHtml(this.html),
-      editorConfig,
-    );
+    const editor = await editorType.create(normalizeHtml(this.html), {
+      ...editorConfig,
+      licenseKey: this.licenseKey,
+    });
     if (this.disposed) {
       await editor.destroy();
       return;
     }
     this.editor = editor;
+    // This is the instance-owned container. CKEditor shares its outer wrapper.
+    editor.ui.view.body.bodyCollectionContainer.classList.add(
+      "papercraft-editor-portal",
+    );
+    this.updatePortalTheme();
+    this.setReadOnly(this.readOnly);
     this.paginator = new DocumentPaginator(editor);
     this.navigation = new DocumentNavigation(editor, this.paginator);
     editor.editing.view.document.on("compositionend", () => this.schedule(), {
@@ -53,12 +96,14 @@ export class PagedEditorController {
     });
     editor.on("openSourceDialog", () => this.onSource(this.getHtml()));
     editor.on("openTablePropertiesDialog", (_, kind) => {
+      if (this.readOnly) return;
       this.tablePropertiesSelection = editor.model.createSelection(
         editor.model.document.selection,
       );
       this.onTableProperties({ kind, ...readTableProperties(editor, kind) });
     });
     editor.on("openImagePreferencesDialog", () => {
+      if (this.readOnly) return;
       const image = selectedImage(editor);
       if (!image) return;
       this.imagePreferencesSelection = editor.model.createSelection(
@@ -95,9 +140,59 @@ export class PagedEditorController {
   }
 
   registerHost(host) {
+    this.resizeObserver?.disconnect();
+    this.visibilityObserver?.disconnect();
+    this.themeObserver?.disconnect();
     this.host = host;
+    const root = host?.closest(".papercraft-editor");
+    const viewport = host?.closest(".workspace-scroll");
+    if (root && typeof MutationObserver !== "undefined") {
+      this.themeObserver = new MutationObserver(() => this.updatePortalTheme());
+      this.themeObserver.observe(root, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+    }
+    if (root && typeof ResizeObserver !== "undefined") {
+      const dimensions = new WeakMap();
+      this.resizeObserver = new ResizeObserver((entries) => {
+        let changed = false;
+        for (const entry of entries) {
+          const size = `${entry.contentRect.width}:${entry.contentRect.height}`;
+          if (dimensions.get(entry.target) !== size) {
+            dimensions.set(entry.target, size);
+            changed = true;
+          }
+        }
+        if (changed) {
+          this.updatePortalTheme();
+          this.schedule();
+        }
+      });
+      // Do not observe editable content: pagination changes its own dimensions.
+      this.resizeObserver.observe(root);
+      if (viewport && viewport !== root) this.resizeObserver.observe(viewport);
+    }
+    if (root && typeof IntersectionObserver !== "undefined") {
+      this.visibilityObserver = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) this.schedule();
+      });
+      this.visibilityObserver.observe(root);
+    }
     this.attach();
     if (host) this.schedule();
+  }
+
+  updatePortalTheme() {
+    const root = this.host?.closest(".papercraft-editor");
+    const portal = this.editor?.ui.view.body.bodyCollectionContainer;
+    if (!root || !portal) return;
+    const theme = getComputedStyle(root);
+    for (const token of PORTAL_THEME_TOKENS) {
+      const value = theme.getPropertyValue(`--${token}`).trim();
+      if (value) portal.style.setProperty(`--${token}`, value);
+      else portal.style.removeProperty(`--${token}`);
+    }
   }
 
   getHtml() {
@@ -119,12 +214,21 @@ export class PagedEditorController {
     this.schedule();
   }
 
+  setReadOnly(readOnly) {
+    this.readOnly = Boolean(readOnly);
+    if (!this.editor) return;
+    if (this.readOnly) this.editor.enableReadOnlyMode("papercraft-host");
+    else this.editor.disableReadOnlyMode("papercraft-host");
+  }
+
   schedule() {
     if (this.disposed) return;
     this.onLayout(false);
     cancelAnimationFrame(this.frame);
     this.frame = requestAnimationFrame(() => {
       if (!this.editor?.ui.getEditableElement()?.isConnected) return;
+      if (!this.editor.ui.getEditableElement().getBoundingClientRect().width)
+        return;
       // Rebuilding view text nodes must wait until native IME composition ends.
       if (this.editor.editing.view.document.isComposing) return;
       try {
@@ -139,6 +243,7 @@ export class PagedEditorController {
   }
 
   applyHtml(html) {
+    if (this.readOnly || !this.editor) return;
     validateHtml(html);
     const { model } = this.editor;
     model.change((writer) => {
@@ -150,6 +255,7 @@ export class PagedEditorController {
   }
 
   addPage() {
+    if (this.readOnly || !this.editor) return;
     this.editor.model.change((writer) => {
       const root = this.editor.model.document.getRoot();
       writer.insertElement("manualPageBreak", root, "end");
@@ -161,6 +267,7 @@ export class PagedEditorController {
   }
 
   deletePage(name) {
+    if (this.readOnly || !this.editor) return;
     const index = Number(name.replace("page-", "")) - 1;
     const pages = this.paginator.pages;
     if (pages.length <= 1 || !pages[index]) return;
@@ -179,7 +286,7 @@ export class PagedEditorController {
   }
 
   insertText(text) {
-    if (!this.editor) return;
+    if (this.readOnly || !this.editor) return;
     this.editor.model.change((writer) =>
       this.editor.model.insertContent(writer.createText(text)),
     );
@@ -196,7 +303,7 @@ export class PagedEditorController {
   }
 
   applyTableProperties(kind, changes) {
-    if (!this.editor || !this.tablePropertiesSelection) return;
+    if (this.readOnly || !this.editor || !this.tablePropertiesSelection) return;
     this.editor.model.change((writer) => {
       writer.setSelection(this.tablePropertiesSelection);
       for (const [property, value] of Object.entries(changes)) {
@@ -212,6 +319,9 @@ export class PagedEditorController {
   async destroy() {
     this.disposed = true;
     this.domEvents.abort();
+    this.resizeObserver?.disconnect();
+    this.visibilityObserver?.disconnect();
+    this.themeObserver?.disconnect();
     cancelAnimationFrame(this.frame);
     const editable = this.editor?.ui.getEditableElement();
     const toolbar = this.editor?.ui.view.toolbar.element;
@@ -231,6 +341,7 @@ export class PagedEditorController {
   }
 
   applyImagePreferences(changes) {
+    if (this.readOnly) return;
     const editor = this.editor;
     if (!editor || !this.imagePreferencesTarget) return;
     let image = this.imagePreferencesTarget;

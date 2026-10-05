@@ -1,5 +1,7 @@
 # PRD: Paged WYSIWYG editor component for document templates in RO App
 
+> Historical planning document. The implemented component and IDs-only backend PDF flow are defined in [design.md](design.md) and [the embedding guide](../../docs/embedding.md). Earlier draft PDF requirements and component names are superseded.
+
 ## 1. Summary
 
 RO App will introduce a reusable paged WYSIWYG editor component for document templates. The component must let users edit page-based HTML templates inside the product while seeing a production-oriented preview without a mandatory separate preview step. The selected implementation path is `Option 2`: `CKEditor 5 + custom paged shell`, rather than a heavyweight embeddable document-editor suite, because document-editor licensing cost is out of scope for the first version.
